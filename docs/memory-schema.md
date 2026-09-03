@@ -198,6 +198,28 @@ A failed anchor as a *staleness signal*, three-verdict discipline
 (confirmed / refuted / unverifiable) and drift-binding to a source block are
 stage 2 and need their own security round.
 
+### Derived claims (#467)
+
+Some facts should never be stored as a number: the source is cheap and local
+enough to calculate while a memory is loaded. `derived_claims` records a
+formula, not its answer:
+
+```yaml
+derived_claims:
+  - id: failure-modes.total
+    resolver: count.markdown-numbered-list.v1
+    source: sources/failure-modes.md
+    case_ref: harness://case/derived-count-never-stores-value
+```
+
+`load_memory` returns the observed value in a separate `derived.claims` block.
+It never writes that value into the note, so a count cannot become a second
+cache. The first resolver is deliberately narrow: it counts numbered Markdown
+list items in one regular file below the vault root, up to 1 MB. Symlink escapes,
+missing files, directories and oversized sources return `unverifiable` instead
+of reading outside the vault. `case_ref` is an opaque link to an independent
+case; Bastra does not follow it or expose its evidence.
+
 ### Supersession (#164)
 
 `replaces` and `superseded_by` are the two halves of one directed edge. Passing

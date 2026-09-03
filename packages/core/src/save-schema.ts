@@ -9,7 +9,7 @@
  */
 import { z } from "zod";
 import type { MemoryLocator } from "./memory-locator.js";
-import { MemoryTypeEnum, isPathSafeComponent } from "./schema.js";
+import { DerivedClaimSchema, MemoryTypeEnum, isPathSafeComponent } from "./schema.js";
 import { isPathSafeFolder } from "./save-text.js";
 
 /**
@@ -78,6 +78,12 @@ export const SaveMemoryInput = z.object({
   /** #235: optional anchor command that can prove this memory's claim.
    *  Stored and displayed only — nothing here ever runs it. */
   verify_cmd: z.string().min(1).optional(),
+  /**
+   * #467: locally derived facts.  A claim stores a bounded resolver and an
+   * in-vault source, never its current value.  The daemon evaluates it only
+   * while loading the memory and leaves the note untouched.
+   */
+  derived_claims: z.array(DerivedClaimSchema).optional(),
   related: z.array(z.string()).optional(),
   /**
    * Obsidian-Aliases (#188): Substrat-Plumbing, kein Agent-Knob — der Daemon

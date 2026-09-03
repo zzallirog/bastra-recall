@@ -83,7 +83,7 @@ Two failure modes that outlive their cause, both spelled out in the `save_memory
 
 Always `recall()` the title/topic first. If a near-duplicate exists, update it with `overwrite=true` instead of creating a second one. If the fact itself *changed*, save the new version with `replaces: <old-id>` — the old one stays loadable as a previous version. Merely related? That's a `[[wikilink]]`, not a supersede.
 
-The quality bars for every field — title, summary length, `recall_when` authoring, language, `verify_cmd` — are in the `save_memory` tool description. Follow them there.
+The quality bars for every field — title, summary length, `recall_when` authoring, language, `verify_cmd`, `derived_claims` — are in the `save_memory` tool description. Follow them there.
 
 ### After saving — ack format
 
