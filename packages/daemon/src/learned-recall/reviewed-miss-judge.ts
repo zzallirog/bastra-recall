@@ -1,4 +1,14 @@
-import { createHash } from "node:crypto";
+import {
+  hash,
+  humanIntent,
+  isEvidenceRead,
+  isRecall,
+  matchingResults,
+  readEnvelope,
+  resultText,
+  sourceRef,
+  toolUses,
+} from "./reviewed-miss-shared.js";
 import type { ChatFn } from "./reranker.js";
 
 export type ReviewDecision = "recall-relevant" | "bridge-review" | "note-draft" | "uncertain";
@@ -44,32 +54,6 @@ export function buildRung2ReadAttestation(): string {
   ].join(" ");
 }
 
-interface ToolUse { id?: unknown; name?: unknown; input?: unknown }
-
-function hash(value: string): string {
-  return `sha256:${createHash("sha256").update(value).digest("hex").slice(0, 32)}`;
-}
-
-function humanText(content: unknown): string | null {
-  if (typeof content === "string") return content.trim() || null;
-  if (!Array.isArray(content)) return null;
-  if (content.some((part) => typeof part === "object" && part !== null && "tool_use_id" in part)) return null;
-  const text = content
-    .filter((part): part is { type?: unknown; text?: unknown } => typeof part === "object" && part !== null)
-    .filter((part) => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-  return text || null;
-}
-
-function humanIntent(record: Record<string, unknown>): string | null {
-  if (record.isMeta === true || "sourceToolUseID" in record) return null;
-  const text = humanText((record.message as { content?: unknown } | undefined)?.content);
-  if (!text || /^\[Image:\s*source:/i.test(text)) return null;
-  return text;
-}
-
 function parseRung2ReadAttestation(text: string): Rung2ReadAttestation | null {
   const tag = /<rung2-read-attestation>\s*([\s\S]*?)\s*<\/rung2-read-attestation>/i.exec(text)?.[1];
   if (!tag) return null;
@@ -95,52 +79,6 @@ function assistantText(content: unknown): string | null {
     .join("\n")
     .trim();
   return text || null;
-}
-
-function toolUses(record: Record<string, unknown>): ToolUse[] {
-  const content = (record.message as { content?: unknown } | undefined)?.content;
-  if (!Array.isArray(content)) return [];
-  return content.filter((part): part is ToolUse & { type: "tool_use" } =>
-    typeof part === "object" && part !== null && (part as { type?: unknown }).type === "tool_use",
-  );
-}
-
-function isRecall(tool: ToolUse): boolean {
-  return typeof tool.name === "string" && /(?:^|__)recall$/i.test(tool.name);
-}
-
-function isEvidenceRead(tool: ToolUse): boolean {
-  return typeof tool.name === "string" && /^(Read|Glob|Grep|Search|find_document|read_document)$/i.test(tool.name);
-}
-
-function sourceRef(tool: ToolUse): string | null {
-  if (!tool.input || typeof tool.input !== "object") return null;
-  const input = tool.input as Record<string, unknown>;
-  for (const key of ["file_path", "path", "id", "query"]) {
-    if (typeof input[key] === "string" && input[key]) return hash(`${key}:${input[key]}`);
-  }
-  return null;
-}
-
-function resultMatches(record: Record<string, unknown>, ids: Set<string>): boolean {
-  const content = (record.message as { content?: unknown } | undefined)?.content;
-  return Array.isArray(content) && content.some((part) =>
-    typeof part === "object" && part !== null &&
-    typeof (part as { tool_use_id?: unknown }).tool_use_id === "string" &&
-    ids.has((part as { tool_use_id: string }).tool_use_id),
-  );
-}
-
-function explicitMiss(value: unknown, depth = 0): boolean {
-  if (depth > 8 || value === null || value === undefined) return false;
-  if (typeof value === "string") {
-    try { return explicitMiss(JSON.parse(value), depth + 1); } catch { return /no (?:relevant )?(?:memory|result|hit)/i.test(value); }
-  }
-  if (Array.isArray(value)) return value.some((item) => explicitMiss(item, depth + 1));
-  if (typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return record.weak_result === true || (Array.isArray(record.hits) && record.hits.length === 0) ||
-    Object.values(record).some((item) => explicitMiss(item, depth + 1));
 }
 
 /**
@@ -174,11 +112,13 @@ export function extractReviewTraces(jsonl: string, sessionIdentity: string): Rev
         recall = null;
         evidence = null;
       }
-      if (recall && resultMatches(record, recall.ids)) {
-        recall.resultSeen = true;
-        recall.explicit ||= explicitMiss(record);
+      if (recall) {
+        for (const part of matchingResults(record, recall.ids)) {
+          recall.resultSeen = true;
+          recall.explicit ||= readEnvelope(resultText(part)).explicitMiss;
+        }
       }
-      if (evidence && resultMatches(record, evidence.ids)) evidence.resultSeen = true;
+      if (evidence && matchingResults(record, evidence.ids).length > 0) evidence.resultSeen = true;
       continue;
     }
     if (record.type !== "assistant") continue;
@@ -189,7 +129,7 @@ export function extractReviewTraces(jsonl: string, sessionIdentity: string): Rev
     }
     for (const tool of toolUses(record)) {
       if (isRecall(tool) && intent) {
-        recall = { ids: new Set(typeof tool.id === "string" ? [tool.id] : []), resultSeen: false, explicit: explicitMiss(record) };
+        recall = { ids: new Set(typeof tool.id === "string" ? [tool.id] : []), resultSeen: false, explicit: false };
         evidence = null;
       } else if (recall?.resultSeen && isEvidenceRead(tool) && !evidence) {
         evidence = { ids: new Set(typeof tool.id === "string" ? [tool.id] : []), resultSeen: false, sourceRef: sourceRef(tool) };
