@@ -316,7 +316,7 @@ export function resolveTarget(
     if (!snapshot || !frozen) return { kind: "unresolved", sourceRef: candidateId };
     return vaultObjectTarget(candidateId, snapshot.objects.get(evidence.memoryId) ?? null, true, atMs, frozen);
   }
-  if (evidence.kind === "file-read") {
+  if (evidence.kind === "file-read" || evidence.kind === "bash-read") {
     const path = resolve(evidence.path);
     const sourceRef = hash("file_path:" + evidence.path);
     if (!vaultRoot || !insideVault(vaultRoot, path)) {

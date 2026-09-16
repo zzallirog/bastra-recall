@@ -183,6 +183,39 @@ test("engines: telemetry pool + vault snapshot prove the four vault-side classes
   }
 });
 
+test("engines: a Bash cat/tail of a real file classifies the same as an equivalent Read, and an unrecognized shape stays unknown", async () => {
+  const { dir, vault, engines } = await fixture();
+  try {
+    const observe = (recallId: string, evidence: { name: string; input: Record<string, unknown> }, served: string[] = ["served-one"]) => {
+      const [chain] = extractReviewedMissChains(session(recallId, served, evidence), "s.jsonl");
+      return observeChain(chain, engines);
+    };
+    const bash = (command: string) => ({ name: "Bash", input: { command } });
+
+    // the exact shape docs/design/2026-09-17-...-three-days-measured.md §4
+    // named as invisible: a hook-style recall, then a plain `cat`/`tail` of a
+    // log outside the vault. It must land where the equivalent Read would.
+    const readPath = join(dir, "elsewhere.md");
+    assert.equal(
+      observe("r-outpool", bash(`cat ${readPath}`)).classification,
+      observe("r-outpool", { name: "Read", input: { file_path: readPath } }).classification,
+    );
+    assert.equal(observe("r-outpool", bash(`cat ${readPath}`)).classification, "external-source");
+    assert.equal(observe("r-outpool", bash(`tail -20 ${readPath}`)).classification, "external-source");
+
+    // a real vault file read through `cat` resolves to the same vault object a Read would
+    const vaultPath = join(vault, "memories", "far-three.md");
+    assert.equal(observe("r-outpool", bash(`cat ${vaultPath}`)).classification, "genuine-out-of-pool");
+
+    // a compound command (pipe) never becomes evidence — it is not one of the closed shapes,
+    // and with nothing else in the turn the chain does not even form, so nothing is classified
+    const [noChain] = extractReviewedMissChains(session("r-outpool", ["served-one"], bash(`cat ${readPath} | wc -l`)), "s.jsonl");
+    assert.equal(noChain, undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("engines: without --events or --vault nothing can be claimed", async () => {
   const [chain] = extractReviewedMissChains(session("r-inpool", ["served-one"], { name: "mcp__bastra-recall__load_memory", input: { id: "deep-two" } }), "s.jsonl");
   const bare: ObservationEngines = { pools: null, vaultRoot: null, snapshot: null, labels: new Map() };
@@ -445,7 +478,7 @@ test("live specimens: real hashed observations replay to their recorded class, a
   }
   // fixture-only classes are named, not assumed: this list is the current live coverage
   const fixtureOnly = REVIEWED_MISS_CLASSES.filter((cls) => !seen.has(cls));
-  assert.deepEqual(fixtureOnly, ["unindexed-vault-object", "vault-gap", "unknown"]);
+  assert.deepEqual(fixtureOnly, ["unindexed-vault-object", "vault-gap"]);
   // specimensOf keeps one per (lane, class) and drops nothing else
   assert.equal(specimensOf(specimens.map((s) => ({ lane: s.lane, classification: s.classification, observation: s.observation, sessionRef: s.provenance.sessionRef, recallRef: s.provenance.recallRef })), { harvested_at: "x", window_days: 8 }).length, specimens.length);
 });

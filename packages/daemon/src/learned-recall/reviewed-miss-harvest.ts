@@ -38,6 +38,7 @@ export interface ReviewedMissChain {
 export type ReviewedMissEvidence =
   | { kind: "load-memory"; memoryId: string }
   | { kind: "file-read"; path: string }
+  | { kind: "bash-read"; path: string }
   | { kind: "opaque"; sourceRef: string | null };
 
 export interface ReviewedMissCandidate {
@@ -56,6 +57,10 @@ function isLoadMemory(tool: ToolUse): boolean {
   return typeof tool.name === "string" && /(?:^|__)load_memory$/i.test(tool.name);
 }
 
+function isBash(tool: ToolUse): boolean {
+  return typeof tool.name === "string" && /^Bash$/i.test(tool.name);
+}
+
 function evidenceOf(tool: ToolUse): ReviewedMissEvidence {
   const input = (tool.input && typeof tool.input === "object" ? tool.input : {}) as Record<string, unknown>;
   if (isLoadMemory(tool) && typeof input.id === "string" && input.id) return { kind: "load-memory", memoryId: input.id };
@@ -63,6 +68,77 @@ function evidenceOf(tool: ToolUse): ReviewedMissEvidence {
     return { kind: "file-read", path: input.file_path };
   }
   return { kind: "opaque", sourceRef: sourceRef(tool) };
+}
+
+/**
+ * Split a shell command into its bare-word / quoted-word tokens. No escaping,
+ * no expansion — good enough to recognize `cat FILE`, never to run anything.
+ * Returns null on an unterminated quote, which the caller treats the same as
+ * "does not fit the shape".
+ */
+function tokenizeSimpleCommand(command: string): string[] | null {
+  const tokens: string[] = [];
+  const text = command.trim();
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && /\s/.test(text[i])) i += 1;
+    if (i >= text.length) break;
+    if (text[i] === '"' || text[i] === "'") {
+      const quote = text[i];
+      const end = text.indexOf(quote, i + 1);
+      if (end === -1) return null;
+      tokens.push(text.slice(i + 1, end));
+      i = end + 1;
+    } else {
+      const start = i;
+      while (i < text.length && !/\s/.test(text[i])) i += 1;
+      tokens.push(text.slice(start, i));
+    }
+  }
+  return tokens;
+}
+
+/** Shell features that turn "one command" into "a script" — never guess through these. */
+const SHELL_METACHARACTERS = /[;&|`$<>\n]/;
+const GLOB_CHARACTERS = /[*?[\]{}]/;
+
+function looksLikeSinglePath(token: string): boolean {
+  return token.length > 0 && !token.startsWith("-") && !GLOB_CHARACTERS.test(token);
+}
+
+const CAT_FLAG = /^-[A-Za-z]+$/;
+const HEAD_TAIL_FLAG = /^-(?:f|c\d+|n\d+|\d+)$/;
+const GREP_BOOL_CHARS = new Set([..."ivcnlwxoEF"]);
+
+function isGrepFlag(token: string): boolean {
+  return /^-[A-Za-z]+$/.test(token) && [...token.slice(1)].every((ch) => GREP_BOOL_CHARS.has(ch));
+}
+
+/**
+ * Recognize a single-file read from a small, closed set of shapes: `cat`,
+ * `head`/`tail` (bare or with a self-contained flag like `-n40`/`-60`/`-f`),
+ * `grep PATTERN FILE`. Anything with a pipe, redirect, subshell, variable
+ * expansion, glob, or more than one positional argument returns null — an
+ * honest `unknown` beats a guessed path.
+ */
+function bashReadPath(command: string): string | null {
+  if (SHELL_METACHARACTERS.test(command)) return null;
+  const tokens = tokenizeSimpleCommand(command);
+  if (!tokens || tokens.length < 2) return null;
+  const [cmd, ...rest] = tokens;
+  if (cmd === "cat" || cmd === "head" || cmd === "tail") {
+    const flag = cmd === "cat" ? CAT_FLAG : HEAD_TAIL_FLAG;
+    const positional = rest.filter((t) => !flag.test(t));
+    if (positional.length !== 1) return null;
+    return looksLikeSinglePath(positional[0]) ? positional[0] : null;
+  }
+  if (cmd === "grep") {
+    const positional = rest.filter((t) => !isGrepFlag(t));
+    if (positional.length !== 2) return null;
+    const path = positional[1];
+    return looksLikeSinglePath(path) ? path : null;
+  }
+  return null;
 }
 
 /**
@@ -147,6 +223,13 @@ export function extractReviewedMissChains(jsonl: string, sessionIdentity: string
         evidence = null;
       } else if (pending?.resultSeen && (isEvidenceRead(tool) || isLoadMemory(tool)) && evidence === null) {
         evidence = evidenceOf(tool);
+      } else if (pending?.resultSeen && isBash(tool) && evidence === null) {
+        // Most Bash calls are not evidence reads at all (uptime, find, ps…).
+        // Unlike Read/load_memory, an unrecognized shape does not consume the
+        // slot — it would otherwise freeze every chain on the first `find`.
+        const input = (tool.input && typeof tool.input === "object" ? tool.input : {}) as Record<string, unknown>;
+        const path = typeof input.command === "string" ? bashReadPath(input.command) : null;
+        if (path) evidence = { kind: "bash-read", path };
       }
     }
   }
@@ -158,7 +241,7 @@ export function extractReviewedMissChains(jsonl: string, sessionIdentity: string
 export function toCandidate(chain: ReviewedMissChain): ReviewedMissCandidate {
   const ref = chain.evidence.kind === "load-memory"
     ? hash("id:" + chain.evidence.memoryId)
-    : chain.evidence.kind === "file-read"
+    : chain.evidence.kind === "file-read" || chain.evidence.kind === "bash-read"
       ? hash("file_path:" + chain.evidence.path)
       : chain.evidence.sourceRef;
   return {
