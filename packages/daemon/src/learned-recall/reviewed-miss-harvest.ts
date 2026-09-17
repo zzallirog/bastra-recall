@@ -102,8 +102,14 @@ function tokenizeSimpleCommand(command: string): string[] | null {
 const SHELL_METACHARACTERS = /[;&|`$<>\n]/;
 const GLOB_CHARACTERS = /[*?[\]{}]/;
 
+/**
+ * `resolveTarget` runs offline, in the harvester's own process — it has no
+ * access to the cwd the session's shell actually had. A relative token would
+ * resolve against the wrong directory and silently mislabel a vault hit as
+ * external (or the reverse); only an absolute path can be resolved honestly.
+ */
 function looksLikeSinglePath(token: string): boolean {
-  return token.length > 0 && !token.startsWith("-") && !GLOB_CHARACTERS.test(token);
+  return token.length > 0 && token.startsWith("/") && !GLOB_CHARACTERS.test(token);
 }
 
 const CAT_FLAG = /^-[A-Za-z]+$/;

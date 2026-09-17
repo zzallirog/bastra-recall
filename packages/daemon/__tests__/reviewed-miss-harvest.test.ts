@@ -205,6 +205,9 @@ test("a Bash call outside the closed cat/head/tail/grep shape does not manufactu
     "echo \"$(cat file.log)\"", // subshell
     "find /home/user -iname '*.log'", // not a read command at all
     "uptime",
+    "cat notes.log", // relative — the offline harvester has no session cwd to resolve it against
+    "cat ./notes.log", // same, with an explicit leading dot
+    "tail -20 ../reading/notes.log", // same, parent-relative
   ];
   for (const command of rejected) {
     // an unrecognized Bash call never consumes the evidence slot (unlike a
