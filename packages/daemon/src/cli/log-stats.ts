@@ -24,6 +24,8 @@ import {
   renderReleaseGate,
 } from "./log-stats-thresholds.js";
 import { RECALL_BUDGET_MS } from "../hook-budgets.js";
+import { buildContextLedger, type LedgerEvent } from "../context-ledger.js";
+import { isEvalTraffic } from "../telemetry-dimensions.js";
 
 export {
   releaseVerdicts, releaseGateMet, laneVerdict,
@@ -32,6 +34,10 @@ export {
 } from "./log-stats-thresholds.js";
 
 export { foldClientDuplicates, restartWindows, DUPLICATE_WINDOW_MS } from "./log-stats-phases.js";
+import { aggregateCodeRoi, renderCodeAwareness, renderCodeRoi, type CodeRoiStats } from "./log-stats-code.js";
+export { aggregateCodeRoi, renderCodeAwareness, renderCodeRoi, type CodeRoiStats } from "./log-stats-code.js";
+import { aggregateCodeAwareness, type CodeAwarenessStats } from "../code-awareness-stats.js";
+export { aggregateCodeAwareness, type CodeAwarenessStats } from "../code-awareness-stats.js";
 
 const EVENT_FILE = /^events-(\d{4}-\d{2}-\d{2})\.jsonl$/;
 
@@ -83,6 +89,14 @@ export interface LogStats {
   saves: SaveStats;
   /** #479: automatic hints removed after repeated version-local non-use. */
   hintSuppression: HintSuppressionStats;
+  /** #579: was die Code-Awareness in diesem Fenster gekostet und genannt hat.
+   *  Getrennt geführt, weil `hint_tokens_est` das ganze injizierte Dokument
+   *  zählt und Code- von Memory-Kontext nicht unterscheidbar wäre. */
+  codeRoi: CodeRoiStats;
+  /** #589: die aktive Hälfte — `find_code`/`find_affected_files` und die
+   *  Graph-Refreshes. Eigene Ereignisse, deshalb eigene Faltung; dieselbe
+   *  Faltung, die der UI-Report benutzt (`code-awareness-stats.ts`). */
+  codeAwareness: CodeAwarenessStats;
 }
 
 export interface SaveStats {
@@ -241,6 +255,12 @@ export function aggregate(rawEvents: Array<Record<string, unknown>>): LogStats {
   const restartLanes = finish(byModeRestart);
 
   return {
+    codeRoi: aggregateCodeRoi(
+      events.filter((e) => e.kind === "hook_call") as Array<Record<string, unknown>>,
+    ),
+    // #589: over ALL events — these kinds are not hook calls and would never
+    // have reached a filter written for the passive half.
+    codeAwareness: aggregateCodeAwareness(events),
     from,
     to,
     lanes,
@@ -334,6 +354,10 @@ export function renderStats(stats: LogStats, budgetMs: number): string {
     }
     out.push(...renderSaves(stats.saves));
     out.push(...renderHintSuppression(stats.hintSuppression));
+    // #589: a window can hold tool calls and refreshes without a single hook
+    // lane call — an agent that only ever asks `find_code` produces exactly
+    // that, and the old early return dropped its whole readout.
+    out.push(...renderCodeAwareness(stats.codeAwareness));
     return out.join("\n");
   }
 
@@ -406,6 +430,8 @@ export function renderStats(stats: LogStats, budgetMs: number): string {
     out.push("");
     out.push(...suppressionLines);
   }
+  out.push(...renderCodeRoi(stats.codeRoi));
+  out.push(...renderCodeAwareness(stats.codeAwareness));
   if (stats.otherKinds.length > 0) {
     out.push("");
     out.push(`  also in window: ${stats.otherKinds.map((k) => `${k.kind}×${k.count}`).join(", ")}`);
@@ -460,8 +486,19 @@ function hookBudgetMs(): number {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_HOOK_BUDGET_MS;
 }
 
-export async function cmdLogStats(opts: { sinceMs: number }): Promise<number> {
-  const events = await readEvents(defaultLogDir(), Date.now() - opts.sinceMs);
-  process.stdout.write(`${renderStats(aggregate(events), hookBudgetMs())}\n`);
+export async function cmdLogStats(opts: { sinceMs: number; includeEval?: boolean }): Promise<number> {
+  const allEvents = await readEvents(defaultLogDir(), Date.now() - opts.sinceMs);
+  // #619: same exclusion as scripts/stats.ts — a probe/eval run that stamped
+  // dimensions.client = "eval" must not move this readout unnoticed either.
+  const evalEvents = allEvents.filter(isEvalTraffic);
+  const events = opts.includeEval ? allEvents : allEvents.filter((e) => !isEvalTraffic(e));
+  let out = renderStats(aggregate(events), hookBudgetMs());
+  if (evalEvents.length > 0) {
+    const excludedTokens = buildContextLedger(evalEvents as LedgerEvent[]).total.totalTokens;
+    out += opts.includeEval
+      ? `\n  eval/synthetic traffic included (#619): ${evalEvents.length} events, ~${excludedTokens} context-tax tokens`
+      : `\n  excluded as eval/synthetic (#619): ${evalEvents.length} events, ~${excludedTokens} context-tax tokens — rerun with --include-eval to include them`;
+  }
+  process.stdout.write(`${out}\n`);
   return 0;
 }

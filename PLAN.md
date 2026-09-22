@@ -2,9 +2,9 @@
 
 The goal is to reduce repeated explanations: keep preferences, decisions and
 lessons available across sessions and connected AI tools. This roadmap separates
-the published product from work in preparation and longer-term research.
+the 1.0 baseline from follow-up work and longer-term research.
 
-## Available in the public releases
+## The 1.0 baseline
 
 - Local Markdown memory storage, search and retrieval through MCP and REST.
 - Guided setup, updates and diagnostics through the `bastra` CLI.
@@ -14,9 +14,9 @@ the published product from work in preparation and longer-term research.
 
 See the [latest release](https://github.com/n0mad-ai/bastra-recall/releases/latest)
 for the published version and [CHANGELOG.md](./CHANGELOG.md) for exact version
-boundaries. `main` can contain work not yet available through the published installer.
+boundaries. Development continues on `dev`; `main` carries releases. During a rollout, use the published release assets for installation.
 
-## v1.0 — in preparation
+## Version 1.0
 
 | Work | What it means for users |
 |---|---|
@@ -32,9 +32,9 @@ mode. It measures what a global limit would have withheld; it does not yet
 enforce that limit live. Enabling live enforcement is a measured post-1.0
 step, tracked in [#458](https://github.com/n0mad-ai/bastra-recall/issues/458).
 
-Follow the [v1.0 milestone](https://github.com/n0mad-ai/bastra-recall/milestone/18)
-for remaining work. A prepared implementation is not a claim that every client
-or environment has been field-tested.
+The [v1.0 milestone](https://github.com/n0mad-ai/bastra-recall/milestone/18) records
+the release scope. Version 1.0 does not imply that every client or environment
+has been field-tested; the support matrix retains those distinctions.
 
 ## After v1.0
 
@@ -43,8 +43,10 @@ or environment has been field-tested.
 - Continue the native Mac app as a separate interface over the same memory service.
 
 The technical [evolution design](./docs/Evolutionsarchitektur%20V1%20zu%20V2.md)
-defines the research stages and their measurement gates. It is a design reference,
-not a list of features already shipped.
+defines the research stages and their measurement gates. The
+[V2 → V3 plan](./docs/Evolution%20Architecture%20V2%20to%20V3.md) describes the
+following stage: commitments, permissioned actions, causal learning and shared
+memory. Both are design references, not lists of features already shipped.
 
 ## Boundaries
 

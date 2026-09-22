@@ -1,4 +1,5 @@
 /** CLI command orchestration, including Codex/ChatGPT installation (#15). */
+import { missingVaultReason } from "../vault-presence.js";
 import { resolveTargets } from "./registry.js";
 import {
   VERSION,
@@ -28,6 +29,14 @@ import { validateArgs } from "./flag-spec.js";
 import { describeStale } from "../code-staleness.js";
 import { autostartWarning } from "./autostart.js";
 import { stubFreshness, stubFreshnessLines } from "./stub-freshness.js";
+import { affectsFilesLines, defaultAffectsFilesIo } from "./affects-files-note.js";
+import { installCodeAwarenessStep } from "./code-cmd.js";
+import { enabledRepos } from "../code-graph/enabled-repos.js";
+import { GRAPHIFY_PIN, probeTool } from "../code-graph/graphify-tool.js";
+import { graphDirOf, loadGraph } from "../code-graph/reader.js";
+import { externalRefLines } from "../code-graph/external-refs.js";
+import { isStale, readManifest } from "../code-graph/manifest.js";
+import { scanFileState } from "../code-graph/build.js";
 import type { InstallOpts, ParsedArgs } from "./types.js";
 
 export function showVersion(): void {
@@ -61,6 +70,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     source: null,
     lines: null,
     stats: false,
+    includeEval: false,
     positional: [],
     errors: [],
   };
@@ -88,6 +98,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     else if (a === "--follow" || a === "-f") result.follow = true;
     else if (a === "--stats") result.stats = true;
+    else if (a === "--include-eval") result.includeEval = true;
     else if (a === "--since") {
       result.since = argv[++i] ?? null;
     } else if (a.startsWith("--since=")) {
@@ -177,6 +188,44 @@ export async function installVaultFirstRunStep(
   return { vaultPath: created.path, exit: null };
 }
 
+/**
+ * A vault path that does not exist, caught at install time.
+ *
+ * `--vault <path>` is the user naming the folder, so a missing one is created —
+ * the same createVaultAt the first-run offer uses. A path that came from the
+ * environment or an existing registration is NOT created: when it is missing the
+ * likeliest cause is a drive that is not mounted, and an empty directory on the
+ * mountpoint is exactly what would make the daemon serve nothing. That case is
+ * named, and install goes on — the daemon does boot on a missing vault path and
+ * answers with vault_missing (vault-presence.ts), which is the whole point of
+ * saying it out loud here rather than leaving it to a silent empty result.
+ * Returns an exit code when install must stop, else null.
+ */
+export async function installVaultPresenceStep(
+  i: { flagPath: string | null; resolvedPath: string | null; dryRun: boolean },
+  io: { create?: (path: string) => Promise<{ path: string } | { error: string }>; out?: (s: string) => void } = {},
+): Promise<number | null> {
+  const out = io.out ?? ((t: string) => process.stdout.write(t));
+  const path = i.resolvedPath;
+  const reason = missingVaultReason(path);
+  if (!path || !reason) return null;
+  if (i.flagPath && i.flagPath === path) {
+    if (i.dryRun) {
+      out(`~ would create the vault at ${path} (dry-run): it does not exist yet\n\n`);
+      return null;
+    }
+    const created = await (io.create ?? createVaultAt)(path);
+    if ("error" in created) {
+      process.stderr.write(`✗ could not create the vault at ${path}: ${created.error}\n`);
+      return 1;
+    }
+    out(`✓ created ${created.path} — your memories live here as plain markdown files\n\n`);
+    return null;
+  }
+  out(`⚠ ${reason}.\n  Not creating it: a path from the environment or an earlier registration that is missing is usually an unmounted drive.\n\n`);
+  return null;
+}
+
 export async function cmdInstall(args: ParsedArgs): Promise<number> {
   // `bastra install --help` must document, never act — without this it would
   // fall through to the wizard (TTY) or the missing-surface error (script).
@@ -230,6 +279,10 @@ export async function cmdInstall(args: ParsedArgs): Promise<number> {
   });
   if (firstRun.exit !== null) return firstRun.exit;
   if (firstRun.vaultPath) opts.vaultPath = firstRun.vaultPath;
+  const vaultStep = await installVaultPresenceStep(
+    { flagPath: args.vaultPath, resolvedPath: opts.vaultPath ?? ("path" in preResolve ? preResolve.path : null), dryRun: args.dryRun },
+  );
+  if (vaultStep !== null) return vaultStep;
 
   // #350/#15: the compiled hook client for Claude Code and Codex. Runs before the
   // adapters plan their hook entries, and since #537 it is the single place that
@@ -267,6 +320,8 @@ export async function cmdInstall(args: ParsedArgs): Promise<number> {
   // Prompts only on a TTY without --yes and only when no provider is effective;
   // an Ollama failure never fails the install: surface registration is the job.
   await installSemanticRecallStep({ dryRun: args.dryRun, yes: args.yes, ollama: args.ollama });
+  // Code awareness (#573): an optional companion, asked once, never blocking.
+  await installCodeAwarenessStep({ dryRun: args.dryRun, yes: args.yes });
 
   // #317 — `npx bastra-recall install all` registers everything correctly and
   // still leaves no `bastra` on PATH, because npx installs nothing. This path
@@ -393,6 +448,8 @@ export async function cmdDoctor(args: ParsedArgs): Promise<number> {
   await printVersionPairNote();
   await printAutostartNote();
   await printStubBinaryNote();
+  await printAffectsFilesNote(resolveVaultPath(args.vaultPath));
+  await printCodeGraphNote();
 
   return hadBroken ? 1 : 0;
 }
@@ -412,6 +469,84 @@ export async function cmdDoctor(args: ParsedArgs): Promise<number> {
  * answers every hook call, it just is not the code that is here. And nothing
  * is built — the binary is asked for its stamp (~25 ms), it is not recompiled.
  */
+/**
+ * Unresolved `affects_files` entries (#578) — the fifth global check. Wording
+ * and lookup live in `affects-files-note.ts`; this is the printer, shaped like
+ * the four notes above it: silent when there is nothing to say, and never a
+ * failure (a memory pointing at a moved file does not break anything).
+ */
+async function printAffectsFilesNote(cliVault: string | null): Promise<void> {
+  try {
+    // Same resolution as every other vault-touching command, so a machine
+    // whose vault is only known from an existing registration is checked too.
+    const vault = await resolveVault({ dryRun: true, vaultPath: cliVault });
+    if ("error" in vault) return;
+    const lines = await affectsFilesLines(defaultAffectsFilesIo(vault.path));
+    if (lines.length === 0) return;
+    process.stdout.write("→ affects_files\n");
+    for (const line of lines) process.stdout.write(`  ${line}\n`);
+    process.stdout.write("\n");
+  } catch {
+    /* a diagnostics NOTE must never break doctor */
+  }
+}
+
+/**
+ * Code awareness (#573, #574): which Graphify Recall uses, which repositories
+ * are enabled, and whether their graphs are current.
+ *
+ * Silent when nothing is enabled — which is the default, and not a problem to
+ * report. Like every other global note it never flips doctor's exit code: a
+ * missing or stale code graph is a degraded optional feature, not a broken
+ * installation (C-090 is a release obligation, not a runtime one).
+ */
+async function printCodeGraphNote(): Promise<void> {
+  try {
+    const repos = await enabledRepos();
+    const tool = await probeTool();
+    if (repos.length === 0 && tool.usable === null && tool.external === null) return;
+
+    process.stdout.write("\u2192 code awareness\n");
+    if (tool.usable !== null) {
+      process.stdout.write(`  graphify ${tool.usable.version} (pinned ${GRAPHIFY_PIN})\n`);
+    } else if (repos.length > 0) {
+      process.stdout.write(`  \u26a0 graphify unavailable — ${tool.reason}\n`);
+    }
+    if (tool.external !== null) {
+      // Reported so an overlap is visible; Recall never changes it (#573).
+      process.stdout.write(
+        `  note: your own Graphify at ${tool.external.path} is left untouched\n`,
+      );
+    }
+    for (const repo of repos) {
+      const manifest = await readManifest(graphDirOf(repo));
+      if (manifest === null) {
+        process.stdout.write(`  \u26a0 ${repo}: no graph yet — run 'bastra code index'\n`);
+        continue;
+      }
+      const state = await scanFileState(repo).catch(() => null);
+      const stale = isStale(manifest, state?.newestMtimeMs ?? 0);
+      process.stdout.write(`  ${stale ? "\u26a0 " : ""}${repo}: built ${manifest.builtAt ?? "never"}`);
+      process.stdout.write(stale ? " (may be outdated)\n" : "\n");
+      if (manifest.lastError !== null) {
+        process.stdout.write(`    last error: ${manifest.lastError}\n`);
+      }
+      // #582: the package boundary is the half of the graph Graphify does not
+      // carry, and it fails SILENTLY — a changed id format costs every
+      // cross-package answer while the graph still loads and looks fine.
+      const loaded = await loadGraph(repo);
+      if (loaded.ok) {
+        for (const line of externalRefLines(loaded.graph.externalStats)) {
+          process.stdout.write(`    ${line}\n`);
+        }
+      }
+    }
+    process.stdout.write("\n");
+  } catch {
+    /* a diagnostics NOTE must never break doctor */
+  }
+}
+
 async function printStubBinaryNote(): Promise<void> {
   try {
     const report = await stubFreshness();

@@ -68,6 +68,11 @@ Commands:
     [--origin <url>]         With 'token': also allowlist this browser Origin
                              (e.g. https://bastra.io) so the web app can reach
                              the daemon — no plist/env editing needed
+  code <enable|disable|index|rebuild|status>
+                             Code awareness per repository: shows an agent what
+                             depends on a file before it edits one, and adds
+                             find_code. Off until enabled; builds a local code
+                             map, sends nothing anywhere (macOS/Linux)
   commons <enable|update|disable|status>
                              Bastra Commons: community-proven recipes as a
                              read-only second recall index (git-synced)
@@ -141,6 +146,8 @@ Options:
   --lines <n>                Cap the number of lines printed (logs only, default 200)
   --stats                    Aggregate per trigger lane instead of printing lines
                              (logs only; --since defaults to 7d)
+  --include-eval             With --stats: also count rows marked as eval/
+                             synthetic traffic (excluded by default, #619)
   --fix                      With doctor: repair non-ok surfaces (on 'all', won't set up ones never installed)
   --no-stop-hook             Skip the Stop save-eval hook (registered by default)
   --stub                     Download the compiled hook client for Claude Code without asking (~70 MB)
@@ -178,6 +185,24 @@ const SURFACE_ARG = `Surfaces:
  * whichever spelling the user typed is the one echoed back.
  */
 export const COMMAND_HELP: Record<string, string> = {
+  code: `bastra code — code awareness for a repository
+
+Usage:
+  bastra code                        What is enabled, which Graphify, how fresh
+  bastra code enable [<dir>]         Turn it on here and build the graph once
+  bastra code disable [<dir>]        Turn it off; the graph files stay
+  bastra code index [<dir>]          Refresh the graph (incremental, ~2s)
+  bastra code rebuild [<dir>] [--yes]
+                                     Repair: rebuild with --force, which
+                                     overrides Graphify's refusal to replace a
+                                     larger graph with a smaller one
+
+Recall reads the graph Graphify writes and shows an agent what depends on a
+file before it edits one. Nothing is indexed until you enable a repository,
+the graph never leaves your machine, and no code is sent to an LLM.
+
+The graph lives in <dir>/graphify-out/ and is excluded from git locally.
+macOS and Linux for now.`,
   install: `bastra install — register bastra-recall with an AI client
 
 Usage:
@@ -268,6 +293,8 @@ Options:
                          Which log source to read (default all)
   --lines <n>            Cap the number of lines printed (default 200)
   --stats                Aggregate per lane instead of printing lines
+  --include-eval         With --stats: also count eval/synthetic-marked rows
+                         (excluded by default, #619)
 `,
 
   autostart: `bastra autostart — keep the daemon running, or let it start on demand

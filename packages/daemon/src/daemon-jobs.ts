@@ -16,6 +16,7 @@ import { bridgesPath } from "./cli/bridges.js";
 import { unloadOllamaModel } from "./ollama-lifecycle.js";
 import { runCuratorPass } from "./curator-run.js";
 import { pruneEventLogs } from "./log-retention.js";
+import { observeCodeGraphRefresh, startCodeAwareness } from "./code-graph/service.js";
 
 export interface BackgroundJobDeps {
   vault: Vault;
@@ -55,6 +56,35 @@ export function startBackgroundJobs(deps: BackgroundJobDeps): void {
   startOllamaUnload(deps);
   startCuratorTick(deps);
   startLogRetention();
+  startCodeGraph(deps);
+}
+
+// Code awareness (#574, #581): preload the graphs of enabled repositories,
+// reconcile anything a killed daemon left half-built, and watch the trees and
+// git refs. Does nothing at all when no repository is enabled, which is the
+// default — Recall never indexes a directory nobody asked about.
+//
+// Deliberately not awaited and never fatal: a moved checkout or a corrupt
+// graph must not keep the daemon from booting, and the feature is optional by
+// contract (C-090 is a release obligation, not a runtime one).
+function startCodeGraph(deps: BackgroundJobDeps): void {
+  // #589: every refresh run leaves a row — reason, outcome, how long the
+  // repository was behind. Without it the graph's freshness was visible only
+  // as a stale marker on a block that happened to be injected.
+  observeCodeGraphRefresh((row) => {
+    void deps.telemetry.logCodeGraphRefresh(row).catch(() => {});
+  });
+  void startCodeAwareness((line) => console.error(`[bastra-recall] ${line}`))
+    .then(({ repos }) => {
+      if (repos.length > 0) {
+        console.error(`[bastra-recall] code awareness: watching ${repos.length} repo(s)`);
+      }
+    })
+    .catch((err) => {
+      console.error(
+        `[bastra-recall] code awareness failed to start (non-fatal): ${(err as Error)?.message ?? err}`,
+      );
+    });
 }
 
 // Periodic disk reconcile: the fs watcher misses external writes/deletes on
@@ -63,12 +93,21 @@ export function startBackgroundJobs(deps: BackgroundJobDeps): void {
 // touches the vault directly. reconcile() walks the disk itself (watcher-
 // independent) and emits add/remove events, which flow through the vault
 // listeners into the shared file. Set BASTRA_VAULT_RECONCILE_MS=0 to disable.
-function startVaultReconcile(vault: Vault): void {
+//
+// #368: exported — the bridge (bridge.ts) is a long-lived process with the
+// same watcher-only blind spot and had no fallback at all. Same function,
+// same env var and default, so a disabled reconcile stays disabled
+// everywhere instead of drifting between the two entry points. Returns the
+// interval handle (null when disabled) so a caller can clearInterval it on
+// its own shutdown; unref() already keeps it from blocking process exit.
+export function startVaultReconcile(vault: Vault): NodeJS.Timeout | null {
   const reconcileMs = envInt("BASTRA_VAULT_RECONCILE_MS", 60_000);
-  if (reconcileMs <= 0) return;
-  setInterval(() => {
+  if (reconcileMs <= 0) return null;
+  const timer = setInterval(() => {
     void vault.reconcile().catch(() => {});
-  }, reconcileMs).unref();
+  }, reconcileMs);
+  timer.unref();
+  return timer;
 }
 
 // Stale-Forwarder-Sweep (#80): Desktop-Zombies (toter Client, lebender

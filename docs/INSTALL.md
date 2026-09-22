@@ -1,8 +1,12 @@
 # More installation options / Weitere Installationswege
 
-For the guided setup, start with the [README](../README.md#install). The [support matrix](../README.md#supported-platforms) lists platform limitations. / Für das geführte Setup beginne mit der [README](../README.md#installation). Die [Support-Matrix](../README.md#unterstützte-plattformen) nennt Plattformgrenzen.
+[English](#english) · [Deutsch](#deutsch)
+
+<a id="english"></a>
 
 ## English
+
+For the guided setup, start with the [README](../README.md#install). The [support matrix](../README.md#supported-platforms) lists platform limitations.
 
 ### macOS download
 
@@ -26,11 +30,33 @@ npm run build
 node packages/daemon/dist/cli.js install all --vault /absolute/path/to/your/vault
 ```
 
+### Optional: code awareness (third-party tool)
+
+`bastra install` asks once whether to enable code awareness. Saying yes installs
+[Graphify](https://github.com/Graphify-Labs/graphify) (PyPI package `graphifyy`,
+**pinned to 0.9.63**, Apache-2.0) into a Bastra-owned tool directory under
+`~/.bastra/tools`, using [uv](https://docs.astral.sh/uv/). Without `uv` the
+install continues and simply reports the feature as unavailable.
+
+Graphify is a separate open-source project, not a Recall component. It runs
+locally and sends nothing anywhere. Recall calls only its `extract` command in
+code-only mode and reads the `graph.json` it writes — never its own installers,
+which would edit your global `CLAUDE.md` and register competing hooks.
+
+If you already have Graphify installed yourself, Recall reports it and leaves
+it completely alone: it is never upgraded, downgraded or removed, and Recall
+uses its own pinned copy. See [USAGE.md](./USAGE.md) for turning the feature on
+and off.
+
 ### Manual client configuration
 
 Use the [manual setup guide](./USAGE.md#fully-manual-install--fallback). Codex uses a separate [TOML-based setup](./CODEX.md). Restart the client after changing registrations, then run `bastra doctor` to check them.
 
+<a id="deutsch"></a>
+
 ## Deutsch
+
+Für das geführte Setup beginne mit der [README](../README.md#installation). Die [Support-Matrix](../README.md#unterstützte-plattformen) nennt Plattformgrenzen.
 
 ### macOS-Download
 
@@ -53,6 +79,26 @@ npm install
 npm run build
 node packages/daemon/dist/cli.js install all --vault /absoluter/pfad/zu/deinem/vault
 ```
+
+### Optional: Code-Awareness (Drittanbieter-Werkzeug)
+
+`bastra install` fragt einmal, ob Code-Awareness eingeschaltet werden soll. Bei
+Ja wird [Graphify](https://github.com/Graphify-Labs/graphify) (PyPI-Paket
+`graphifyy`, **fest auf 0.9.63**, Apache-2.0) mit
+[uv](https://docs.astral.sh/uv/) in ein Bastra-eigenes Werkzeugverzeichnis
+unter `~/.bastra/tools` installiert. Ohne `uv` läuft die Installation weiter und
+meldet die Funktion schlicht als nicht verfügbar.
+
+Graphify ist ein eigenständiges Open-Source-Projekt, kein Bestandteil von
+Recall. Es läuft lokal und schickt nichts irgendwohin. Recall ruft davon nur
+`extract` im Code-only-Modus auf und liest die erzeugte `graph.json` — nie
+dessen eigene Installer, die deine globale `CLAUDE.md` verändern und
+konkurrierende Hooks eintragen würden.
+
+Hast du Graphify bereits selbst installiert, meldet Recall das und lässt es
+vollständig in Ruhe: Es wird nie aktualisiert, herabgestuft oder entfernt, und
+Recall benutzt seine eigene festgelegte Kopie. Wie man die Funktion ein- und
+ausschaltet, steht in [USAGE.md](./USAGE.md).
 
 ### Client manuell konfigurieren
 

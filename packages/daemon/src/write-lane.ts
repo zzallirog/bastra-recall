@@ -18,7 +18,7 @@
  * thing mid-migration), session state stays on the file bus.
  */
 import { appendFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { request } from "node:http";
 import { randomUUID } from "node:crypto";
 import { detectTopics, extractContentExcerpt } from "@bastra-recall/core";
@@ -30,11 +30,18 @@ import { defaultLogDir } from "./telemetry.js";
 import { recordBudgetShadow } from "./session-budget.js";
 import { applyLaneScopeFilter, projectConfidence, projectForFilter, projectForLane } from "./scope-filter.js";
 import { fileSizeNote } from "./file-size-check.js";
+import { impactNote, type ImpactNote, type ImpactResult } from "./code-graph/impact-block.js";
+import { appliesToNote, type AppliesToNote } from "./code-graph/applies-to-note.js";
+import { laneRepoRoot } from "./code-graph/git-paths.js";
+import { codeGraphCache, repoRelative } from "./code-graph/dependents-block.js";
+import { logDeliveredBlock } from "./code-delivered-telemetry.js";
 import { memoryLocationNote } from "./memory-location.js";
 import { reportHinted } from "./hook-hinted.js";
-import { hookClient } from "./hook-surface.js";
+import { hookClient, hookClientEvidence, type HookClientEvidence } from "./hook-surface.js";
+import { dimensionsFrom } from "./telemetry-dimensions.js";
 import {
   bumpShown,
+  recordTouched,
   cleanupOldStates,
   decideBackoff,
   getLoadedMarkerMtime,
@@ -124,6 +131,9 @@ export async function runWriteLane(
 ): Promise<string> {
   const startedAt = Date.now();
   const client = hookClient(payload);
+  // #507 Nachbesserung: nur für die Telemetrie-Dimension — `client` oben bleibt
+  // der surface-Default fürs Hint-Block-Attribut und den Recall-Loopback.
+  const clientEvidence = hookClientEvidence(payload);
 
   if (payload.hook_event_name !== "PreToolUse") return "{}";
   const toolName = payload.tool_name ?? "";
@@ -145,7 +155,6 @@ export async function runWriteLane(
   // size note: deterministic, rides through suppression, fail-open. The two
   // combine into one deterministic block for every emit path.
   const locationNote = await memoryLocationNote(filePath, toolInput, vaultRoot).catch(() => null);
-  const detNote = [sizeNote, locationNote].filter((n): n is string => n !== null).join("\n") || null;
 
   const intent = {
     tool_name: toolName,
@@ -238,6 +247,120 @@ export async function runWriteLane(
     sessionState = await loadSessionState(sessionId);
     dedupActive = true;
   }
+
+  // #577/#606: the code-graph change-impact block. It joins the other two
+  // deterministic notes but is computed here, because it needs the session
+  // snapshot for its own dedupe — the same rule as the memory hints (§16.2),
+  // so the same answer is not repeated on every edit. Silent on a cold or
+  // missing graph (see impact-block.ts), and it never marks a memory
+  // required (§13.1).
+  // #606: the query is no longer the FILE's dependents but the dependents of
+  // the SYMBOLS this very call changes, derived from the tool input. Same
+  // lane, same silence rules, a measurably sharper answer — and it is the
+  // answer `find_affected_files` gives, delivered rather than offered, because
+  // v3 measured the tool being called 0 times in 44 of 44 runs.
+  // The FILE decides the repository, not the working directory: an edit from
+  // a subdirectory would otherwise miss the graph entirely (#577). Falls back
+  // to `cwd`, so nothing that worked before stops working.
+  // #578: memories that declare this file via `affects_files`, plus memories
+  // on files that depend on it. A deterministic block of its own rather than
+  // recall hits, because these candidates carry no score — the reasoning, and
+  // the fact that it is a reversible assumption, is in applies-to-note.ts.
+  // Same dedupe rule, same silence on anything missing.
+  // #584: every target of the call, as an absolute path. Codex' apply_patch
+  // names repo-relative paths, often several; both blocks need an absolute
+  // one, so before this they were silent on every Codex patch.
+  // In target order, whichever finishes first: the blocks read top-down.
+  const targets = codeTargets(toolInput, filePath, cwd);
+  const perTarget = await Promise.all(
+    targets.map(async (target) => {
+      const repoRoot = laneRepoRoot(target, cwd);
+      const [impact, applies] = await Promise.all([
+        impactNote({
+          filePath: target,
+          repoRoot,
+          toolName,
+          toolInput,
+          session: sessionState,
+        }).catch((): ImpactResult => ({ note: null, dedupeHit: false })),
+        appliesToNote({ filePath: target, repoRoot, session: sessionState }).catch(() => null),
+      ]);
+      return { repoRoot, impact, applies };
+    }),
+  );
+  const codeNotes = perTarget
+    .map((t) => t.impact.note)
+    .filter((n): n is ImpactNote => n !== null);
+  const memoryCodeNotes = perTarget.map((t) => t.applies).filter((n): n is AppliesToNote => n !== null);
+  // #606: one `code_tool_call` row per delivered block, and one per dedupe hit
+  // — the two silences that are worth telling apart. Fire-and-forget: the row
+  // is the measurement, not part of the answer.
+  for (const t of perTarget) {
+    if (t.impact.note === null && !t.impact.dedupeHit) continue;
+    void logDeliveredBlock({
+      sessionId: payload.session_id ?? null,
+      lane: "write",
+      repo: t.repoRoot,
+      dedupeHit: t.impact.dedupeHit,
+      ...(t.impact.note !== null
+        ? {
+            basis: t.impact.note.basis,
+            files: t.impact.note.files,
+            truncated: t.impact.note.truncated,
+            tokensEst: t.impact.note.tokensEst,
+            tookMs: t.impact.note.tookMs,
+          }
+        : {}),
+    });
+  }
+  for (const n of [...codeNotes, ...memoryCodeNotes]) {
+    const key = n.dedupeKey;
+    stateDeltas.push((s) => bumpShown(s, key, Date.now()));
+  }
+  // #572: book what this call is about to write, block or no block. The
+  // per-edit answer above dedupes by design, so the session-wide union can
+  // only come from an accumulator — the Stop lane reads it at the task
+  // boundary. Booked WITH the dependents of this moment: the watcher reindexes
+  // after the edit, and the next graph no longer knows who called a symbol
+  // this edit removed.
+  perTarget.forEach((t, i) => {
+    const repoRoot = t.repoRoot;
+    const booking = t.impact.booking;
+    if (booking === undefined) {
+      // The impact module never reached the file — a tool it cannot read a
+      // change out of, or it threw. The write happens anyway, so it is booked
+      // unplaced rather than not at all. (NotebookEdit used to be the example
+      // here, and it was the wrong one: it names its target `notebook_path`,
+      // so the lane returned before this line ever ran. `hook-write-input.ts`
+      // normalizes it now.)
+      const rel = repoRelative(repoRoot, targets[i]!);
+      if (rel !== null && codeGraphCache().allows(repoRoot)) {
+        stateDeltas.push((s) => recordTouched(s, repoRoot, rel, null));
+      }
+      return;
+    }
+    // A dedupe hit books no hits on the claim that the delivery it repeats
+    // already booked them. That holds only if this session HAS such an entry;
+    // a `shown` counter without one (state written before #572) proves
+    // nothing, and the edit is booked as one the lane could not look at.
+    const vouched = sessionState.touched?.get(repoRoot)?.get(booking.file) !== undefined;
+    const hits = t.impact.dedupeHit && !vouched ? null : booking.hits;
+    stateDeltas.push((s) => recordTouched(s, repoRoot, booking.file, hits, booking.truncated));
+  });
+  // Targets past MAX_CODE_TARGETS get no impact block (#584's cap), but they
+  // are written all the same. Booked unplaced, so the boundary neither loses
+  // them nor counts their dependents as forgotten files.
+  for (const target of uncappedTargets(toolInput, filePath, cwd).slice(targets.length)) {
+    const repoRoot = laneRepoRoot(target, cwd);
+    const rel = repoRelative(repoRoot, target);
+    if (rel === null || !codeGraphCache().allows(repoRoot)) continue;
+    stateDeltas.push((s) => recordTouched(s, repoRoot, rel, null));
+  }
+
+  const detNote =
+    [sizeNote, locationNote, ...codeNotes.map((n) => n.note), ...memoryCodeNotes.map((n) => n.note)]
+      .filter((n): n is string => n !== null)
+      .join("\n") || null;
 
   const survivingHits: RecallHit[] = [];
   let droppedDedupCount = 0;
@@ -367,6 +490,7 @@ export async function runWriteLane(
   recordBudgetShadow(sessionId || null, "hook_call", hintTokensEst);
   await writeTelemetry({
     session_id: sessionId || null,
+    client: clientEvidence,
     tool_name: toolName,
     file_path: filePath,
     topics: topics.topics,
@@ -384,6 +508,31 @@ export async function runWriteLane(
     ...(scopeFilter.skipped ? { scope_filter_skipped: scopeFilter.skipped } : {}),
     ...(scopeFilter.droppedScopes.length > 0 ? { dropped_scopes: scopeFilter.droppedScopes } : {}),
     hint_tokens_est: hintTokensEst,
+    // #579: die Kostenseite der Code-Awareness, getrennt von den Memory-Hints.
+    // Ohne diese Felder ist in der Telemetrie nicht unterscheidbar, ob ein
+    // teurer Hook-Aufruf Memories oder Code-Kontext geliefert hat.
+    ...(codeNotes.length > 0
+      ? {
+          code_block_tokens_est: codeNotes.reduce((n, c) => n + c.tokensEst, 0),
+          // #606: candidate FILES of the symbol-level answer, where this used
+          // to be the dependents of the whole file. The field keeps its name
+          // so the ROI series stays one series across the change — what it
+          // counts is still "files this block named as possibly breaking".
+          code_dependents: codeNotes.reduce((n, c) => n + c.files, 0),
+          code_stale: codeNotes.some((c) => c.stale),
+          code_listed: codeNotes.flatMap((c) => c.listed),
+          // #606: how sharp each block was. Without it a drop in reach cannot
+          // be told from a repository whose edits all land outside every symbol.
+          code_basis: codeNotes.map((c) => c.basis),
+        }
+      : {}),
+    code_targets: targets,
+    ...(memoryCodeNotes.length > 0
+      ? {
+          applies_to_tokens_est: memoryCodeNotes.reduce((n, c) => n + Math.ceil(c.note.length / 4), 0),
+          applies_to_count: memoryCodeNotes.reduce((n, c) => n + c.candidates.length, 0),
+        }
+      : {}),
     hinted_ids: hintedIds,
     hinted_types: hintedTypes,
     backoff_streak: backoffStreak,
@@ -547,6 +696,9 @@ function postRecall(
 
 interface HookCallTelemetry {
   session_id: string | null;
+  /** #507: die aufrufende Oberfläche — NUR wenn belegt (`hookClientEvidence`),
+   *  nie der surface-Default. */
+  client: HookClientEvidence;
   tool_name: string;
   file_path: string | null;
   topics: string[];
@@ -571,6 +723,25 @@ interface HookCallTelemetry {
   dropped_scopes?: string[];
   /** Geschätzte Tokens des injizierten <recall-hints>-Blocks (#72). */
   hint_tokens_est: number;
+  /** #579, Code-Awareness — fehlt, wenn kein Codeblock ausgegeben wurde.
+   *  Getrennt von `hint_tokens_est` geführt, weil die ROI-Frage lautet, was
+   *  der CODE-Kontext kostet und was er dafür an Abhängigen nennt. */
+  code_block_tokens_est?: number;
+  /** Anzahl der genannten abhängigen Dateien — die Nutzenseite. */
+  code_dependents?: number;
+  /** Der Graph lag hinter der Datei zurück, als der Block gebaut wurde. */
+  code_stale?: boolean;
+  /** #588: die im Block namentlich genannten Abhängigen, absolut — für
+   *  `dependents_block_followed_by_edit`. */
+  code_listed?: string[];
+  /** #606: `basis` je ausgegebenem Block — symbols | diff | whole_file. */
+  code_basis?: string[];
+  /** #588: die Zieldateien dieses Aufrufs, absolut, die Gegenseite des Joins. */
+  code_targets?: string[];
+  /** #579: Tokens des `affects_files`-Blocks, falls einer ausging. */
+  applies_to_tokens_est?: number;
+  /** Anzahl der zugeordneten Memories. */
+  applies_to_count?: number;
   /** IDs, die tatsächlich emittiert wurden (#72 context-tax per memory). */
   hinted_ids: string[];
   /** #354: Memory-Typ je Eintrag von `hinted_ids`, gleiche Reihenfolge und
@@ -597,17 +768,51 @@ async function writeTelemetry(payload: HookCallTelemetry): Promise<void> {
     const ts = new Date().toISOString();
     // The session_id from the Claude payload is real session state — fall
     // back to a synthetic UUID only if no payload session was given.
-    const { session_id: payloadSessionId, ...rest } = payload;
+    const { session_id: payloadSessionId, client, ...rest } = payload;
     const event = {
       kind: "hook_call",
       ts,
       session_id: payloadSessionId ?? randomUUID(),
       hook_version: HOOK_VERSION,
       ...rest,
+      // #507: pre-tool is this lane's own hook_source — it never varies per
+      // call, unlike client, which the caller already resolved from the
+      // payload (`hookClient`, same value the hint block's surface attribute
+      // uses).
+      dimensions: dimensionsFrom({ client, hook_source: "pre-tool", session_id: payloadSessionId }),
     };
     const file = join(logDir, `events-${ts.slice(0, 10)}.jsonl`);
     await appendFile(file, JSON.stringify(event) + "\n", "utf8");
   } catch {
     // Telemetry must never break the lane.
   }
+}
+
+/**
+ * Most targets of one call that get code blocks. A Codex patch can touch a
+ * dozen files; two blocks each for all of them would bury the edit under
+ * context nobody asked for, so the first few are covered and the rest are not.
+ */
+export const MAX_CODE_TARGETS = 4;
+
+/**
+ * The files a Write/Edit/apply_patch call targets, absolute and de-duplicated
+ * (#584). Relative paths — Codex' apply_patch writes them — are resolved
+ * against the session's `cwd`, which is what they are relative to.
+ */
+export function codeTargets(toolInput: Record<string, unknown>, filePath: string, cwd: string): string[] {
+  return uncappedTargets(toolInput, filePath, cwd).slice(0, MAX_CODE_TARGETS);
+}
+
+/** Every target of the call, in order. `codeTargets` is its first four. */
+function uncappedTargets(toolInput: Record<string, unknown>, filePath: string, cwd: string): string[] {
+  const listed = Array.isArray(toolInput.file_paths)
+    ? toolInput.file_paths.filter((p): p is string => typeof p === "string" && p.length > 0)
+    : [];
+  const all = listed.length > 0 ? listed : [filePath];
+  const seen = new Set<string>();
+  for (const p of all) {
+    seen.add(isAbsolute(p) ? p : resolve(cwd, p));
+  }
+  return [...seen];
 }

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/github-banner.jpg" alt="Bastra Recall — open-source memory for AI assistants" width="100%" />
+  <img src="./assets/github-banner.jpg" alt="Bastra Recall — persistent memory for AI coding agents: works with Claude Code, Cursor and MCP, stores memories as readable Markdown, open source" width="100%" />
 </p>
 
 # Bastra Recall
@@ -17,11 +17,31 @@
 
 **Less repeating yourself. One shared memory for your AI tools.**
 
+We’re building with the ambition to create the best personal memory for everyday work with AI—open, transparent, and under your control.
+
 Keep your preferences, decisions and hard-won fixes available beyond a single chat. Bastra Recall stores them as readable Markdown files on your computer and makes them available to your connected AI assistants.
 
 Supported integrations help assistants save useful lessons and retrieve relevant memories before starting work. You can inspect and edit the files yourself, with Obsidian or any text editor. Automatic recall depends on the client integration and the assistant; it does not guarantee that every instruction will be followed.
 
-**Status:** v1.0 is in preparation. Use the [latest release](https://github.com/n0mad-ai/bastra-recall/releases/latest) for the published version. This branch also documents work for the next release; see the [support matrix](#supported-surfaces) and [changelog](./CHANGELOG.md).
+### Why not just CLAUDE.md?
+
+A CLAUDE.md or AGENTS.md works well while it is small. Every month of project work makes it longer, and the assistant gets all of it in every session, needed or not. Eventually nobody maintains it, and conventions start drifting again.
+
+Bastra Recall picks up there:
+
+- **Targeted, not everything:** Each decision and lesson is stored as its own file. Supported integrations surface the relevant entries before work instead of sending everything every time.
+- **Grows as you work:** The assistant can record new decisions and solved problems while it works. You review and correct them as needed instead of adding everything by hand.
+- **One memory for several tools:** Claude Code, Codex and other MCP-capable tools share the same vault, so you don't have to keep separate rule files in sync.
+
+Keep your CLAUDE.md. Recall adds the knowledge that doesn't belong in every session.
+
+**Version 1.0 is available.** Find published downloads in the [latest release](https://github.com/n0mad-ai/bastra-recall/releases/latest), changes in the [changelog](./CHANGELOG.md), and tested integrations in the [support matrix](#supported-surfaces).
+
+<p align="center">
+  <img src="./assets/recall-demo.gif" alt="A terminal session: two questions, and Bastra Recall surfaces the matching decisions on its own. The status line at the bottom counts the calls, hits and milliseconds." width="100%" />
+</p>
+
+<p align="center"><sub>Two questions, answered from a vault the assistant was never told to search. The bar at the bottom is Claude Code's status line.</sub></p>
 
 ### Install
 
@@ -85,6 +105,10 @@ A project decision made on Monday should still be available on Thursday, even if
 
 [Examples from a working week](./docs/USAGE.md#cookbook) show how these fit together.
 
+### Code awareness
+
+Optional, off until you switch it on per repository with `bastra code enable`. Recall then tells your assistant, before it edits a file, which other files import or call into it — and adds a `find_code` lookup so a symbol can be found by name instead of grepped for. The code map is built locally by [Graphify](https://github.com/Graphify-Labs/graphify), reads only code, is never committed, and no language model ever sees your source. [How to use it](./docs/USAGE.md#code-awareness--what-depends-on-the-file-you-are-editing). macOS and Linux for now.
+
 ### Privacy and control
 
 Storage and keyword search are local. When your assistant retrieves a memory, it receives that content as context; a cloud-based assistant may process it with its provider. Local storage does not make the whole AI session offline.
@@ -104,7 +128,7 @@ A vault in iCloud, Google Drive or Dropbox uses that service's synchronization. 
 
 ### Roadmap
 
-The v1.0 work focuses on measured recall quality, relevant session context and clearer control over memory use. The cumulative session context budget is being measured in shadow mode; it does not yet enforce a live session-wide limit. [Roadmap and release boundaries](./PLAN.md).
+Version 1.0 focuses on measured recall quality, relevant session context and clearer control over memory use. The cumulative session context budget is being measured in shadow mode; it does not yet enforce a live session-wide limit. [Roadmap and release boundaries](./PLAN.md).
 
 A native Bastra Mac app is in development. The open-source package already includes the local browser-based vault map and works independently of that app.
 
@@ -124,11 +148,31 @@ Built by [Daniel / @n0mad-ai](https://github.com/n0mad-ai).
 
 **Weniger wiederholen. Ein gemeinsames Gedächtnis für deine KI-Tools.**
 
+Wir bauen mit dem Anspruch, das beste persönliche Gedächtnis für die tägliche Arbeit mit KI zu schaffen – offen, nachvollziehbar und unter deiner Kontrolle.
+
 Bewahre deine Vorlieben, Entscheidungen und erarbeiteten Lösungen über einzelne Chats hinweg. Bastra Recall speichert sie als lesbare Markdown-Dateien auf deinem Rechner und macht sie deinen verbundenen KI-Assistenten zugänglich.
 
 Unterstützte Integrationen helfen Assistenten, wichtige Erkenntnisse zu speichern und relevante Erinnerungen vor neuen Aufgaben abzurufen. Du kannst die Dateien selbst prüfen und bearbeiten – mit Obsidian oder jedem Texteditor. Automatischer Abruf hängt von der Integration und dem Assistenten ab; er garantiert nicht, dass jede Anweisung befolgt wird.
 
-**Status:** v1.0 ist in Vorbereitung. Die veröffentlichte Version findest du im [aktuellen Release](https://github.com/n0mad-ai/bastra-recall/releases/latest). Dieser Branch beschreibt auch Arbeit für die nächste Version; siehe [Support-Matrix](#unterstützte-oberflächen) und [Changelog](./CHANGELOG.md).
+### Warum nicht einfach CLAUDE.md?
+
+Eine CLAUDE.md oder AGENTS.md funktioniert gut, solange sie klein ist. Mit jedem Monat Projektarbeit wird sie länger, und der Assistent bekommt in jeder Sitzung alles vorgelegt, ob er es braucht oder nicht. Irgendwann pflegt sie niemand mehr, und die Konventionen driften wieder auseinander.
+
+Bastra Recall setzt dort an:
+
+- **Gezielt statt alles:** Jede Entscheidung und jede Lektion liegt als eigene Datei. Unterstützte Integrationen blenden vor der Arbeit die passenden Einträge ein, statt jedes Mal alles mitzuschicken.
+- **Wächst mit:** Der Assistent kann neue Entscheidungen und gelöste Probleme während der Arbeit selbst festhalten. Du prüfst und korrigierst sie bei Bedarf, statt alles von Hand nachzutragen.
+- **Ein Gedächtnis für mehrere Tools:** Claude Code, Codex und andere MCP-fähige Tools greifen auf denselben Vault zu, ohne dass du getrennte Regeldateien abgleichen musst.
+
+Deine CLAUDE.md kann bleiben. Recall ergänzt sie um das Wissen, das nicht in jede Sitzung gehört.
+
+**Version 1.0 ist verfügbar.** Veröffentlichte Downloads findest du im [aktuellen Release](https://github.com/n0mad-ai/bastra-recall/releases/latest), Änderungen im [Changelog](./CHANGELOG.md) und getestete Integrationen in der [Support-Matrix](#unterstützte-oberflächen).
+
+<p align="center">
+  <img src="./assets/recall-demo.gif" alt="Eine Terminal-Sitzung: zwei Fragen, und Bastra Recall legt die passenden Entscheidungen von selbst vor. Die Statusleiste unten zählt Aufrufe, Treffer und Millisekunden." width="100%" />
+</p>
+
+<p align="center"><sub>Zwei Fragen, beantwortet aus einem Vault, das der Assistent nicht durchsuchen sollte. Die Leiste unten ist die Statusleiste von Claude Code.</sub></p>
 
 ### Installation
 
@@ -192,6 +236,10 @@ Eine Projektentscheidung vom Montag soll am Donnerstag noch verfügbar sein, auc
 
 [Beispiele aus einer Arbeitswoche](./docs/USAGE.md#kochbuch) zeigen das Zusammenspiel.
 
+### Code-Awareness
+
+Optional und standardmäßig aus; pro Repository mit `bastra code enable` einzuschalten. Recall sagt deinem Assistenten dann vor einer Dateiänderung, welche anderen Dateien sie importieren oder aufrufen — dazu kommt `find_code`, das ein Symbol beim Namen findet, statt danach zu suchen. Die Code-Karte baut [Graphify](https://github.com/Graphify-Labs/graphify) lokal, sie liest ausschließlich Code, wird nie committet, und kein Sprachmodell sieht deinen Quelltext. [Wie du sie nutzt](./docs/USAGE.md#code-awareness--was-von-der-datei-abhängt-die-du-gerade-bearbeitest). Vorerst macOS und Linux.
+
 ### Datenschutz und Kontrolle
 
 Speicherung und Stichwortsuche laufen lokal. Ruft dein Assistent eine Erinnerung ab, erhält er deren Inhalt als Kontext; ein cloudbasierter Assistent kann ihn bei seinem Anbieter verarbeiten. Lokale Speicherung macht die gesamte KI-Sitzung nicht offline.
@@ -211,7 +259,7 @@ Ein Vault in iCloud, Google Drive oder Dropbox nutzt die Synchronisierung dieses
 
 ### Roadmap
 
-Die Arbeit an v1.0 konzentriert sich auf gemessene Abrufqualität, passenden Sitzungskontext und klarere Kontrolle über die Gedächtnisnutzung. Das kumulative Kontextbudget einer Sitzung wird im Shadow-Modus gemessen; es erzwingt noch keine globale Obergrenze. [Roadmap und Release-Grenzen](./PLAN.md).
+Version 1.0 konzentriert sich auf gemessene Abrufqualität, passenden Sitzungskontext und klarere Kontrolle über die Gedächtnisnutzung. Das kumulative Kontextbudget einer Sitzung wird im Shadow-Modus gemessen; es erzwingt noch keine globale Obergrenze. [Roadmap und Release-Grenzen](./PLAN.md).
 
 Eine native Bastra-Mac-App ist in Entwicklung. Das Open-Source-Paket enthält bereits die lokale browserbasierte Vault-Map und funktioniert unabhängig von dieser App.
 
