@@ -210,6 +210,12 @@ export function renderWithSources(note, byName, byHistory) {
  * edge source can name it: the graph of the parent has no such file, and the
  * test is coupled to the change by load order, not by a name, a history or a
  * call. So every total is also reported split on this flag.
+ *
+ * The same holds one level finer: the file exists, but the diff imports a NAME
+ * the same commit adds to it — ESM refuses the module with "does not provide an
+ * export named …" (reproduced on 0d376847, `documents-write-handler.ts` importing
+ * `hiddenOnDisk`: `session-assembler.test.ts` 19/19 → 18/1). Such an import is
+ * reported as `name from spec`. `parentFiles` maps path → text of the parent tree.
  */
 export function danglingImports(diff, file, parentFiles) {
   const out = [];
@@ -219,10 +225,32 @@ export function danglingImports(diff, file, parentFiles) {
     for (const m of line.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["'](\.{1,2}\/[^"']+)["']/g)) {
       const p = normalizeRel(dir, m[1]);
       const cands = [p, p.replace(/\.js$/, ".ts"), p.replace(/\.mjs$/, ".mts"), `${p}.ts`, `${p}/index.ts`];
-      if (!cands.some((c) => parentFiles.has(c))) out.push(m[1]);
+      const target = cands.find((c) => parentFiles.has(c));
+      if (target === undefined) {
+        out.push(m[1]);
+        continue;
+      }
+      const named = /import\s+(?:type\s+)?\{([^}]*)\}\s*from/.exec(line);
+      if (named === null || /^\+\s*import\s+type\b/.test(line)) continue; // a type-only import never fails at load
+      for (const raw of named[1].split(",")) {
+        const part = raw.trim();
+        if (part === "" || part.startsWith("type ")) continue;
+        const name = part.split(/\s+as\s+/)[0].trim();
+        if (!exportsName(parentFiles.get(target), name)) out.push(`${name} from ${m[1]}`);
+      }
     }
   }
   return [...new Set(out)];
+}
+
+/** Whether a module's text exports `name` — declared, listed, or possibly via `export *`. */
+function exportsName(text, name) {
+  const n = name.replace(/\$/g, "\\$");
+  return (
+    /export\s+\*/.test(text) ||
+    new RegExp(`export\\s+(?:declare\\s+)?(?:default\\s+)?(?:async\\s+)?(?:function\\*?|const|let|var|class|abstract\\s+class|enum)\\s+${n}\\b`).test(text) ||
+    new RegExp(`export\\s*\\{[^}]*\\b${n}\\b`).test(text)
+  );
 }
 
 function normalizeRel(dir, spec) {
@@ -348,7 +376,7 @@ async function main() {
     const withName = [...listed, ...byName.map((h) => h.file)];
     const withHistory = [...listed, ...byHistory.map((h) => h.file)];
     const both = [...withName, ...byHistory.map((h) => h.file)];
-    row.danglingImports = danglingImports(s.diff, s.file, new Set(files.keys()));
+    row.danglingImports = danglingImports(s.diff, s.file, files);
     row.delivered = block !== null;
     row.basis = block?.basis ?? null;
     row.changedSymbols = block?.changedSymbols ?? [];

@@ -148,14 +148,32 @@ describe("dangling imports", () => {
     '+import { settings } from "./settings.js";',
     ' import { a } from "./a.js";',
   ].join("\n");
-  const parent = new Set(["packages/daemon/src/settings.ts", "packages/daemon/src/a.ts"]);
+  const parent = new Map([
+    ["packages/daemon/src/settings.ts", "export const settings = {};"],
+    ["packages/daemon/src/a.ts", "export function a() {}"],
+  ]);
 
   test("names an added import the parent tree does not have, and only that one", () => {
     assert.deepEqual(m.danglingImports(diff, "packages/daemon/src/prompt-lane.ts", parent), ["./code-graph/prompt-impact.js"]);
   });
 
   test("an import that resolves (.js written, .ts on disk) is not dangling", () => {
-    const all = new Set([...parent, "packages/daemon/src/code-graph/prompt-impact.ts"]);
+    const all = new Map([...parent, ["packages/daemon/src/code-graph/prompt-impact.ts", "export function promptImpactNote() {}"]]);
     assert.deepEqual(m.danglingImports(diff, "packages/daemon/src/prompt-lane.ts", all), []);
+  });
+});
+
+describe("missing exports", () => {
+  // 0d376847: documents-write-handler.ts imports `hiddenOnDisk`, which the same commit adds to private-access.ts.
+  const diff = ["@@ -1,1 +1,1 @@", '+import { hiddenFromCaller, hiddenOnDisk } from "./private-access.js";', '+import type { Later } from "./private-access.js";'].join("\n");
+  const parent = new Map([["packages/daemon/src/private-access.ts", "export function hiddenFromCaller() {}"]]);
+
+  test("an imported name the parent's module does not export is a half-applied commit too", () => {
+    assert.deepEqual(m.danglingImports(diff, "packages/daemon/src/documents-write-handler.ts", parent), ["hiddenOnDisk from ./private-access.js"]);
+  });
+
+  test("a type-only import never fails at load, so it is not flagged", () => {
+    const only = ["@@ -1,1 +1,1 @@", '+import type { Later } from "./private-access.js";'].join("\n");
+    assert.deepEqual(m.danglingImports(only, "packages/daemon/src/documents-write-handler.ts", parent), []);
   });
 });
