@@ -26,8 +26,32 @@ import { spawn } from "node:child_process";
 import { findExecutable, run } from "./exec.js";
 import { getOllamaAutostart, setEmbeddingProvider, setGenerationModel } from "../settings.js";
 
-const OLLAMA_URL = (process.env.BASTRA_OLLAMA_URL ?? "http://localhost:11434").replace(/\/+$/, "");
+function ollamaBaseURL(): string {
+  return (process.env.BASTRA_OLLAMA_URL ?? "http://localhost:11434").replace(/\/+$/, "");
+}
 const EMBED_MODEL = process.env.BASTRA_EMBEDDING_MODEL ?? "embeddinggemma";
+
+/**
+ * Ref'd deadline around `fetch`. `AbortSignal.timeout` is unref'd: with no
+ * other handle (a never-settling fetch, a test with no socket) the event loop
+ * drains and node:test cancels the case (`cancelledByParent`) instead of the
+ * abort firing. A hanging TCP peer keeps the loop alive either way; the ref
+ * timer is what makes the deadline real when the peer does not.
+ */
+export async function fetchWithDeadline(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  fetchFn: typeof fetch = fetch,
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetchFn(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(tid);
+  }
+}
 
 export interface EnsureResult {
   status:
@@ -173,9 +197,17 @@ export async function enableSemanticRecall(
 
 /** Is a specific Ollama model pulled? Null when the server did not answer:
  *  "not reachable" is not "not pulled". */
-export async function ollamaModelPulled(name: string): Promise<boolean | null> {
+export async function ollamaModelPulled(
+  name: string,
+  opts?: { fetch?: typeof fetch; timeoutMs?: number },
+): Promise<boolean | null> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetchWithDeadline(
+      `${ollamaBaseURL()}/api/tags`,
+      {},
+      opts?.timeoutMs ?? 4000,
+      opts?.fetch,
+    );
     if (!res.ok) return null;
     const data = (await res.json()) as { models?: { name: string }[] };
     return (data.models ?? []).some((m) => m.name === name || m.name === `${name}:latest`);
@@ -237,7 +269,7 @@ export async function enableGenerationModel(
 
 async function serverVersion(): Promise<string | null> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/version`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetchWithDeadline(`${ollamaBaseURL()}/api/version`, {}, 1500);
     if (!res.ok) return null;
     const data = (await res.json()) as { version?: string };
     // Truthiness fallback (not ??): a 200 with version:"" still means reachable,
@@ -250,7 +282,7 @@ async function serverVersion(): Promise<string | null> {
 
 async function modelPresent(): Promise<boolean> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(2500) });
+    const res = await fetchWithDeadline(`${ollamaBaseURL()}/api/tags`, {}, 2500);
     if (!res.ok) return false;
     const data = (await res.json()) as { models?: { name?: string }[] };
     return (data.models ?? []).some((m) => {

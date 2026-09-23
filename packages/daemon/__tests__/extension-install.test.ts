@@ -7,7 +7,14 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { localMcpbPath, releaseDownloadUrl, pkgVersion, parseSha256 } from "../src/cli/extension-install.js";
+import { createServer, type Server, type Socket } from "node:http";
+import {
+  localMcpbPath,
+  releaseDownloadUrl,
+  pkgVersion,
+  parseSha256,
+  latestMcpbAssetUrl,
+} from "../src/cli/extension-install.js";
 import { parseArgs } from "../src/cli/commands.js";
 
 test("release asset URL and local path are version-locked and consistent", async () => {
@@ -29,6 +36,45 @@ test("parseSha256 accepts sha256sum output and bare digests, rejects everything 
   assert.equal(parseSha256("not a digest"), null);
   assert.equal(parseSha256(`${"a".repeat(63)}  short`), null, "63 hex chars is not a SHA-256");
   assert.equal(parseSha256(`<html>404 Not Found</html>`), null, "an error page never verifies");
+});
+
+function hangServer(): Promise<{ url: string; close: () => Promise<void> }> {
+  const server: Server = createServer(() => {
+    /* accept, never write */
+  });
+  const sockets = new Set<Socket>();
+  server.on("connection", (s) => {
+    sockets.add(s);
+    s.on("close", () => sockets.delete(s));
+  });
+  return new Promise((ok) => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      ok({
+        url: `http://127.0.0.1:${port}/releases/latest`,
+        close: () =>
+          new Promise<void>((done) => {
+            for (const s of sockets) s.destroy();
+            server.close(() => done());
+          }),
+      });
+    });
+  });
+}
+
+test("latestMcpbAssetUrl: hanging GitHub returns null inside the deadline", async () => {
+  const hang = await hangServer();
+  const t0 = Date.now();
+  try {
+    const r = await latestMcpbAssetUrl({ apiUrl: hang.url, timeoutMs: 400 });
+    assert.equal(r, null);
+    const ms = Date.now() - t0;
+    assert.ok(ms >= 300, `deadline did not wait (${ms}ms)`);
+    assert.ok(ms < 1500, `deadline overran (${ms}ms) — fetch had no timeout`);
+  } finally {
+    await hang.close();
+  }
 });
 
 test("--extension flag parses and stays scoped to the install command", () => {

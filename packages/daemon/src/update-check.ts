@@ -15,6 +15,7 @@
  *   - GitHub-API call is unauthenticated, 5 s timeout.
  */
 import { request as httpsRequest } from "node:https";
+import { request as httpRequest } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
@@ -27,6 +28,9 @@ export const GITHUB_RELEASES_LATEST_URL =
   "https://api.github.com/repos/n0mad-ai/bastra-recall/releases/latest";
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 export const FETCH_TIMEOUT_MS = 5000;
+/** GitHub's latest-release JSON is small; without a cap a hanging or
+ *  dripping peer fills `chunks` until the process OOMs. */
+export const MAX_RELEASE_BODY_BYTES = 256 * 1024;
 const USER_AGENT = "bastra-recall update-check";
 
 export interface LatestRelease {
@@ -138,21 +142,31 @@ function isFresh(iso: string, ttlMs: number, now: number = Date.now()): boolean 
  * Fetches https://api.github.com/repos/n0mad-ai/bastra-recall/releases/latest.
  * Returns null on any error (network, non-200, parse).
  */
-export async function getLatestVersion(): Promise<LatestRelease | null> {
+export async function getLatestVersion(
+  sourceUrl: string = GITHUB_RELEASES_LATEST_URL,
+): Promise<LatestRelease | null> {
   return new Promise((resolve_) => {
+    let settled = false;
+    const done = (v: LatestRelease | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve_(v);
+    };
     let url: URL;
     try {
-      url = new URL(GITHUB_RELEASES_LATEST_URL);
+      url = new URL(sourceUrl);
     } catch {
-      resolve_(null);
+      done(null);
       return;
     }
-    const req = httpsRequest(
+    const isHttps = url.protocol === "https:";
+    const requestFn = isHttps ? httpsRequest : httpRequest;
+    const req = requestFn(
       {
         method: "GET",
         hostname: url.hostname,
         path: url.pathname + url.search,
-        port: 443,
+        port: url.port ? Number(url.port) : isHttps ? 443 : 80,
         headers: {
           "User-Agent": USER_AGENT,
           Accept: "application/vnd.github+json",
@@ -161,10 +175,19 @@ export async function getLatestVersion(): Promise<LatestRelease | null> {
       },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on("data", (c: Buffer) => chunks.push(c));
+        let total = 0;
+        res.on("data", (c: Buffer) => {
+          total += c.length;
+          if (total > MAX_RELEASE_BODY_BYTES) {
+            req.destroy();
+            done(null);
+            return;
+          }
+          chunks.push(c);
+        });
         res.on("end", () => {
           if ((res.statusCode ?? 500) !== 200) {
-            resolve_(null);
+            done(null);
             return;
           }
           try {
@@ -175,10 +198,10 @@ export async function getLatestVersion(): Promise<LatestRelease | null> {
               body?: string;
             };
             if (typeof data.tag_name !== "string") {
-              resolve_(null);
+              done(null);
               return;
             }
-            resolve_({
+            done({
               tag: data.tag_name,
               html_url: typeof data.html_url === "string" ? data.html_url : "",
               published_at:
@@ -186,16 +209,16 @@ export async function getLatestVersion(): Promise<LatestRelease | null> {
               body: typeof data.body === "string" ? data.body : "",
             });
           } catch {
-            resolve_(null);
+            done(null);
           }
         });
       },
     );
     req.on("timeout", () => {
       req.destroy();
-      resolve_(null);
+      done(null);
     });
-    req.on("error", () => resolve_(null));
+    req.on("error", () => done(null));
     req.end();
   });
 }

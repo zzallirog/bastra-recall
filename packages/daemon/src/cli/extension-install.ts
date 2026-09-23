@@ -24,6 +24,24 @@ import type { ParsedArgs } from "./types.js";
 const REPO = "n0mad-ai/bastra-recall";
 /** A real bundle is megabytes; anything tiny is an error page, not a .mcpb. */
 const MIN_MCPB_BYTES = 100 * 1024;
+/** Connect+read deadline for GitHub. `fetch` has none of its own. */
+export const MCPB_FETCH_TIMEOUT_MS = 15_000;
+
+/** Ref'd deadline — `AbortSignal.timeout` is unref'd (see ollama.ts). */
+export async function fetchWithDeadline(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = MCPB_FETCH_TIMEOUT_MS,
+  fetchFn: typeof fetch = fetch,
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetchFn(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(tid);
+  }
+}
 
 function pkgRoot(): string {
   // dist layout: dist/cli/… → package root is one up; running from src
@@ -52,14 +70,26 @@ export function releaseDownloadUrl(version: string): string {
 
 /** Fallback when this CLI version's release carries no bundle (yet): the
  *  newest release's .mcpb asset, whatever version it is. */
-export async function latestMcpbAssetUrl(): Promise<string | null> {
-  const resp = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-    headers: { Accept: "application/vnd.github+json" },
-  });
-  if (!resp.ok) return null;
-  const body = (await resp.json()) as { assets?: Array<{ name?: string; browser_download_url?: string }> };
-  const asset = (body.assets ?? []).find((a) => a.name?.endsWith(".mcpb"));
-  return asset?.browser_download_url ?? null;
+export async function latestMcpbAssetUrl(opts?: {
+  apiUrl?: string;
+  timeoutMs?: number;
+  fetch?: typeof fetch;
+}): Promise<string | null> {
+  const apiUrl = opts?.apiUrl ?? `https://api.github.com/repos/${REPO}/releases/latest`;
+  try {
+    const resp = await fetchWithDeadline(
+      apiUrl,
+      { headers: { Accept: "application/vnd.github+json" } },
+      opts?.timeoutMs ?? MCPB_FETCH_TIMEOUT_MS,
+      opts?.fetch,
+    );
+    if (!resp.ok) return null;
+    const body = (await resp.json()) as { assets?: Array<{ name?: string; browser_download_url?: string }> };
+    const asset = (body.assets ?? []).find((a) => a.name?.endsWith(".mcpb"));
+    return asset?.browser_download_url ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** First whitespace-delimited token of a `.sha256` file, when it is a
@@ -71,7 +101,7 @@ export function parseSha256(text: string): string | null {
 
 async function fetchChecksum(url: string): Promise<string | null> {
   try {
-    const resp = await fetch(url);
+    const resp = await fetchWithDeadline(url);
     if (!resp.ok) return null;
     return parseSha256(await resp.text());
   } catch {
@@ -81,7 +111,7 @@ async function fetchChecksum(url: string): Promise<string | null> {
 
 async function download(url: string, dest: string): Promise<boolean> {
   try {
-    const resp = await fetch(url);
+    const resp = await fetchWithDeadline(url);
     if (!resp.ok) return false;
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.byteLength < MIN_MCPB_BYTES) return false;
