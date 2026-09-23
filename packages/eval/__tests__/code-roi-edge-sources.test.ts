@@ -192,3 +192,17 @@ describe("multi-line imports", () => {
     assert.deepEqual(m.danglingImports(same, "packages/daemon/src/bash-fail-lane.ts", parent), []);
   });
 });
+
+describe("an import list longer than the hunk's context", () => {
+  // The real 7c5946c9 shape: `import {` sits more than three lines above the added name.
+  const parentText = ["import {", "  aaaaaaaa,", "  bbbbbbbb,", "  cccccccc,", "  dddddddd,", "  loadSessionState,", '} from "./session-state.js";', "", "run();"].join("\n");
+  const diff = ["@@ -3,4 +3,5 @@", "   bbbbbbbb,", "   cccccccc,", "   dddddddd,", "+  mutateSessionState,", "   loadSessionState,"].join("\n");
+  const parent = new Map([
+    ["packages/daemon/src/bash-fail-lane.ts", parentText],
+    ["packages/daemon/src/session-state.ts", "export function loadSessionState() {}\nexport const aaaaaaaa = 1, bbbbbbbb = 2;\nexport { cccccccc, dddddddd };"],
+  ]);
+
+  test("the file is rebuilt from the parent, so the statement is read whole", () => {
+    assert.deepEqual(m.danglingImports(diff, "packages/daemon/src/bash-fail-lane.ts", parent), ["mutateSessionState from ./session-state.js"]);
+  });
+});

@@ -226,8 +226,7 @@ export function danglingImports(diff, file, parentFiles) {
   // spans lines is read whole — `import {\n  a,\n+  added,\n} from "./x.js"`
   // adds a name on a line that carries no `from` (7c5946c9, found by the
   // fresh-eyes audit 09-23). A statement counts when it has an added line.
-  const lines = String(diff ?? "").split("\n").filter((l) => !l.startsWith("+++") && !l.startsWith("---"));
-  const side = lines.filter((l) => l.startsWith("+") || l.startsWith(" ")).map((l) => ({ added: l.startsWith("+"), text: l.slice(1) }));
+  const side = newSide(diff, parentFiles.get(file));
   const text = side.map((l) => l.text).join("\n");
   const addedAt = [];
   let pos = 0;
@@ -259,6 +258,45 @@ export function danglingImports(diff, file, parentFiles) {
     }
   }
   return [...new Set(out)];
+}
+
+/**
+ * The changed file AFTER the diff, line by line, each marked added or not.
+ *
+ * A hunk carries three lines of context, so an import list longer than that
+ * starts outside it — 7c5946c9 adds `mutateSessionState` to an import whose
+ * `import {` line the hunk never shows, and a diff-only reading missed it on the
+ * real data while the short unit case passed. With the parent's text the whole
+ * file is rebuilt; without it, the diff's own new side is the fallback.
+ */
+export function newSide(diff, parentText) {
+  const lines = String(diff ?? "").split("\n");
+  if (typeof parentText !== "string") {
+    return lines
+      .filter((l) => !l.startsWith("+++") && !l.startsWith("---") && (l.startsWith("+") || l.startsWith(" ")))
+      .map((l) => ({ added: l.startsWith("+"), text: l.slice(1) }));
+  }
+  const old = parentText.split("\n");
+  const out = [];
+  let next = 0; // index into old
+  let inHunk = false;
+  for (const l of lines) {
+    const h = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/.exec(l);
+    if (h !== null) {
+      const start = Number(h[2]) === 0 ? Number(h[1]) : Number(h[1]) - 1;
+      while (next < start) out.push({ added: false, text: old[next++] });
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || l.startsWith("+++") || l.startsWith("---") || l.startsWith("\\")) continue;
+    if (l.startsWith("+")) out.push({ added: true, text: l.slice(1) });
+    else if (l.startsWith("-")) next++;
+    else if (l.startsWith(" ") || l === "") {
+      out.push({ added: false, text: old[next++] ?? "" });
+    }
+  }
+  while (next < old.length) out.push({ added: false, text: old[next++] });
+  return out;
 }
 
 /** Whether a module's text exports `name` — declared, listed, or possibly via `export *`. */
