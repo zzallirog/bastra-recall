@@ -197,6 +197,42 @@ export function renderWithSources(note, byName, byHistory) {
   return note.replace(/\n<\/code-impact>$/, `\n${extra.join("\n")}\n</code-impact>`);
 }
 
+/**
+ * Relative imports the diff ADDS that resolve to no file of the parent tree.
+ *
+ * A scenario applies exactly one file's diff. When the commit also created the
+ * module that diff imports, the mutated tree imports a file that is not there,
+ * and every test that loads the module fails with "Cannot find module" — found
+ * on 09-23 by reproducing `session-assembler.test.ts` breaking under the
+ * `prompt-lane.ts` change of a1a96db3, a test that on a healthy tree never calls
+ * into prompt-lane at all. That truth is real under the registered rule, but no
+ * edge source can name it: the graph of the parent has no such file, and the
+ * test is coupled to the change by load order, not by a name, a history or a
+ * call. So every total is also reported split on this flag.
+ */
+export function danglingImports(diff, file, parentFiles) {
+  const out = [];
+  const dir = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
+  for (const line of String(diff ?? "").split("\n")) {
+    if (!line.startsWith("+") || line.startsWith("+++")) continue;
+    for (const m of line.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["'](\.{1,2}\/[^"']+)["']/g)) {
+      const p = normalizeRel(dir, m[1]);
+      const cands = [p, p.replace(/\.js$/, ".ts"), p.replace(/\.mjs$/, ".mts"), `${p}.ts`, `${p}/index.ts`];
+      if (!cands.some((c) => parentFiles.has(c))) out.push(m[1]);
+    }
+  }
+  return [...new Set(out)];
+}
+
+function normalizeRel(dir, spec) {
+  const parts = dir === "" ? [] : dir.split("/");
+  for (const seg of spec.split("/")) {
+    if (seg === "..") parts.pop();
+    else if (seg !== ".") parts.push(seg);
+  }
+  return parts.join("/");
+}
+
 /** Coverage and cost of one arm on one scenario. */
 export function scoreArm(named, truth, graphListed) {
   const set = new Set(named);
@@ -299,6 +335,7 @@ async function main() {
     const withName = [...listed, ...byName.map((h) => h.file)];
     const withHistory = [...listed, ...byHistory.map((h) => h.file)];
     const both = [...withName, ...byHistory.map((h) => h.file)];
+    row.danglingImports = danglingImports(s.diff, s.file, new Set(files.keys()));
     row.delivered = block !== null;
     row.basis = block?.basis ?? null;
     row.changedSymbols = block?.changedSymbols ?? [];
@@ -378,23 +415,7 @@ export function staticClosureArm(s) {
 export function summarize(rows, meta) {
   const delivered = rows.filter((r) => r.delivered);
   const silent = rows.filter((r) => !r.delivered);
-  const arms = [...new Set(rows.flatMap((r) => Object.keys(r.arms)))];
-  const totals = {};
-  for (const arm of arms) {
-    // An arm a record cannot carry (no `testSelection` in it) is left out of
-    // that arm's denominator, never counted as a miss.
-    const had = delivered.filter((r) => r.arms[arm] !== undefined);
-    const on = had.map((r) => r.arms[arm]);
-    totals[arm] = {
-      covers: on.filter((a) => a.covers).length,
-      of: had.length,
-      truthNamed: on.reduce((n, a) => n + a.truthNamed, 0),
-      truthTotal: had.reduce((n, r) => n + r.truth.length, 0),
-      lostCorrect: on.reduce((n, a) => n + a.lost.length, 0),
-      extraPerBlock: on.length === 0 ? 0 : on.reduce((n, a) => n + a.extra, 0) / on.length,
-      coversOnSilent: silent.filter((r) => r.arms[arm]?.covers === true).length,
-    };
-  }
+  const dangling = (r) => (r.danglingImports?.length ?? 0) > 0;
   const med = (xs) => {
     const s = [...xs].sort((a, b) => a - b);
     return s.length === 0 ? 0 : s[Math.floor((s.length - 1) / 2)];
@@ -408,8 +429,38 @@ export function summarize(rows, meta) {
       graph: med(delivered.map((r) => r.tokens.graph)),
       graph_name_history: med(delivered.map((r) => r.tokens.graph_name_history)),
     },
-    totals,
+    totals: totalsOf(rows),
+    // The same arms, split on whether the diff imports a module its parent
+    // tree does not have (`danglingImports`): a diagnostic, not a filter.
+    split: {
+      dangling_import: { scenarios: rows.filter(dangling).map((r) => r.id), totals: totalsOf(rows.filter(dangling)) },
+      clean: { scenarios: rows.filter((r) => !dangling(r)).map((r) => r.id), totals: totalsOf(rows.filter((r) => !dangling(r))) },
+    },
   };
+}
+
+/** Per-arm totals over the delivered blocks of `rows`, and what each arm names where the graph is silent. */
+function totalsOf(rows) {
+  const delivered = rows.filter((r) => r.delivered);
+  const silent = rows.filter((r) => !r.delivered);
+  const totals = {};
+  for (const arm of [...new Set(rows.flatMap((r) => Object.keys(r.arms)))]) {
+    // An arm a record cannot carry (no `testSelection` in it) is left out of
+    // that arm's denominator, never counted as a miss.
+    const had = delivered.filter((r) => r.arms[arm] !== undefined);
+    const on = had.map((r) => r.arms[arm]);
+    totals[arm] = {
+      covers: on.filter((a) => a.covers).length,
+      of: had.length,
+      truthNamed: on.reduce((n, a) => n + a.truthNamed, 0),
+      truthTotal: had.reduce((n, r) => n + r.truth.length, 0),
+      lostCorrect: on.reduce((n, a) => n + a.lost.length, 0),
+      extraPerBlock: on.length === 0 ? 0 : on.reduce((n, a) => n + a.extra, 0) / on.length,
+      coversOnSilent: silent.filter((r) => r.arms[arm]?.covers === true).length,
+      silent: silent.length,
+    };
+  }
+  return totals;
 }
 
 export function formatReport(r) {
@@ -421,10 +472,17 @@ export function formatReport(r) {
     "| arm | blocks naming a truth file | truth files named | correct files lost | added non-truth files per block | would name truth where the graph is silent |",
     "|---|---|---|---|---|---|",
   ];
-  for (const [arm, t] of Object.entries(r.totals)) {
-    lines.push(
-      `| ${arm} | ${t.covers}/${t.of} | ${t.truthNamed}/${t.truthTotal} | ${t.lostCorrect} | ${t.extraPerBlock.toFixed(2)} | ${t.coversOnSilent}/${r.silent.length} |`,
-    );
+  const table = (totals) => {
+    for (const [arm, t] of Object.entries(totals)) {
+      lines.push(
+        `| ${arm} | ${t.covers}/${t.of} | ${t.truthNamed}/${t.truthTotal} | ${t.lostCorrect} | ${t.extraPerBlock.toFixed(2)} | ${t.coversOnSilent}/${t.silent} |`,
+      );
+    }
+  };
+  table(r.totals);
+  for (const [name, part] of Object.entries(r.split ?? {})) {
+    lines.push("", `${name}: ${part.scenarios.length} scenarios (${part.scenarios.join(" ")})`, lines[4], lines[5]);
+    table(part.totals);
   }
   return lines.join("\n");
 }

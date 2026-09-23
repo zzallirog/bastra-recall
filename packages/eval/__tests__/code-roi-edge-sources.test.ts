@@ -137,3 +137,25 @@ describe("scoring", () => {
     assert.match(out, /Changed together before \(history, paths only\):\n- docs\/a\.md — 2 of 3 changes\n<\/code-impact>$/);
   });
 });
+
+describe("dangling imports", () => {
+  // a1a96db3: prompt-lane.ts starts importing a module the same commit creates.
+  const diff = [
+    "--- a/packages/daemon/src/prompt-lane.ts",
+    "+++ b/packages/daemon/src/prompt-lane.ts",
+    "@@ -1,1 +1,3 @@",
+    '+import { promptImpactNote } from "./code-graph/prompt-impact.js";',
+    '+import { settings } from "./settings.js";',
+    ' import { a } from "./a.js";',
+  ].join("\n");
+  const parent = new Set(["packages/daemon/src/settings.ts", "packages/daemon/src/a.ts"]);
+
+  test("names an added import the parent tree does not have, and only that one", () => {
+    assert.deepEqual(m.danglingImports(diff, "packages/daemon/src/prompt-lane.ts", parent), ["./code-graph/prompt-impact.js"]);
+  });
+
+  test("an import that resolves (.js written, .ts on disk) is not dangling", () => {
+    const all = new Set([...parent, "packages/daemon/src/code-graph/prompt-impact.ts"]);
+    assert.deepEqual(m.danglingImports(diff, "packages/daemon/src/prompt-lane.ts", all), []);
+  });
+});
