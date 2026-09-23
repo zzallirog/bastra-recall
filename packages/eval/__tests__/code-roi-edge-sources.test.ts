@@ -177,3 +177,18 @@ describe("missing exports", () => {
     assert.deepEqual(m.danglingImports(only, "packages/daemon/src/documents-write-handler.ts", parent), []);
   });
 });
+
+describe("multi-line imports", () => {
+  // 7c5946c9: bash-fail-lane.ts adds `mutateSessionState` inside an existing multi-line import.
+  const diff = ["@@ -1,4 +1,5 @@", " import {", "   loadSessionState,", "+  mutateSessionState,", ' } from "./session-state.js";'].join("\n");
+  const parent = new Map([["packages/daemon/src/session-state.ts", "export function loadSessionState() {}"]]);
+
+  test("a name added inside a multi-line import is checked against the parent module", () => {
+    assert.deepEqual(m.danglingImports(diff, "packages/daemon/src/bash-fail-lane.ts", parent), ["mutateSessionState from ./session-state.js"]);
+  });
+
+  test("an untouched multi-line import is not flagged", () => {
+    const same = ["@@ -1,4 +1,4 @@", " import {", "   loadSessionState,", ' } from "./session-state.js";', "+const x = 1;"].join("\n");
+    assert.deepEqual(m.danglingImports(same, "packages/daemon/src/bash-fail-lane.ts", parent), []);
+  });
+});

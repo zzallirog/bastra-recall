@@ -222,24 +222,40 @@ export function renderWithSources(note, byName, byHistory) {
 export function danglingImports(diff, file, parentFiles) {
   const out = [];
   const dir = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
-  for (const line of String(diff ?? "").split("\n")) {
-    if (!line.startsWith("+") || line.startsWith("+++")) continue;
-    for (const m of line.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["'](\.{1,2}\/[^"']+)["']/g)) {
-      const p = normalizeRel(dir, m[1]);
-      const cands = [p, p.replace(/\.js$/, ".ts"), p.replace(/\.mjs$/, ".mts"), `${p}.ts`, `${p}/index.ts`];
-      const target = cands.find((c) => parentFiles.has(c));
-      if (target === undefined) {
-        out.push(m[1]);
-        continue;
-      }
-      const named = /import\s+(?:type\s+)?\{([^}]*)\}\s*from/.exec(line);
-      if (named === null || /^\+\s*import\s+type\b/.test(line)) continue; // a type-only import never fails at load
-      for (const raw of named[1].split(",")) {
-        const part = raw.trim();
-        if (part === "" || part.startsWith("type ")) continue;
-        const name = part.split(/\s+as\s+/)[0].trim();
-        if (!exportsName(parentFiles.get(target), name)) out.push(`${name} from ${m[1]}`);
-      }
+  // The diff's NEW side (context + added lines), so an import statement that
+  // spans lines is read whole — `import {\n  a,\n+  added,\n} from "./x.js"`
+  // adds a name on a line that carries no `from` (7c5946c9, found by the
+  // fresh-eyes audit 09-23). A statement counts when it has an added line.
+  const lines = String(diff ?? "").split("\n").filter((l) => !l.startsWith("+++") && !l.startsWith("---"));
+  const side = lines.filter((l) => l.startsWith("+") || l.startsWith(" ")).map((l) => ({ added: l.startsWith("+"), text: l.slice(1) }));
+  const text = side.map((l) => l.text).join("\n");
+  const addedAt = [];
+  let pos = 0;
+  for (const l of side) {
+    if (l.added) addedAt.push([pos, pos + l.text.length]);
+    pos += l.text.length + 1;
+  }
+  const touches = (a, b) => addedAt.some(([s, e]) => s <= b && e >= a);
+  const stmt = /import\s+(type\s+)?(?:\{([^}]*)\}\s*from\s*|[\w$*\s,{}]*?\s*from\s*|\(\s*)?["'](\.{1,2}\/[^"']+)["']/g;
+  for (const m of text.matchAll(stmt)) {
+    if (!touches(m.index, m.index + m[0].length)) continue;
+    const p = normalizeRel(dir, m[3]);
+    const cands = [p, p.replace(/\.js$/, ".ts"), p.replace(/\.mjs$/, ".mts"), `${p}.ts`, `${p}/index.ts`];
+    const target = cands.find((c) => parentFiles.has(c));
+    if (target === undefined) {
+      out.push(m[3]);
+      continue;
+    }
+    if (m[1] !== undefined || m[2] === undefined) continue; // a type-only import never fails at load
+    let offset = m.index + m[0].indexOf("{") + 1;
+    for (const raw of m[2].split(",")) {
+      const part = raw.trim();
+      const at = offset;
+      offset += raw.length + 1;
+      if (part === "" || part.startsWith("type ")) continue;
+      const name = part.split(/\s+as\s+/)[0].trim();
+      if (!touches(at, at + raw.length)) continue; // an unchanged name was loadable before the change
+      if (!exportsName(parentFiles.get(target), name)) out.push(`${name} from ${m[3]}`);
     }
   }
   return [...new Set(out)];
