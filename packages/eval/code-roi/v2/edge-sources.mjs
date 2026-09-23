@@ -8,10 +8,11 @@
  * registration 3, `tests/v2`); no agent runs here, only the block.
  *
  * THE GRAPH LINES ARE THE PRODUCT'S, NOT A REPLICA. Each scenario's block comes
- * from `deliveredBlockFor` in the checkout named by `--product`, which must be
- * the pinned build (973c6b8c) with its `dist` built: the same call the runner
- * made, against the same prompt (`promptFor`) and a graph built by the same
- * `buildGraph`. The report refuses to call a result comparable when the
+ * from `promptImpactNote` in the checkout named by `--product`, which must be
+ * the pinned build (973c6b8c) with its `dist` built: the call `deliveredBlockFor`
+ * makes, against the same prompt (`promptFor`) and a graph built by the same
+ * `buildGraph` — with the lane's 120 ms budget lifted and the time recorded
+ * (see `blockWithoutLoadSilence`). The report refuses to call a result comparable when the
  * product's frozen-surface hashes differ from the registration's.
  *
  * THE TWO NEW SOURCES, exactly as #628 proposes them — two more labelled lines
@@ -318,7 +319,7 @@ async function main() {
   }
   if (argOf("--graphify") !== null) process.env.BASTRA_GRAPHIFY_BIN = argOf("--graphify");
   const v2 = join(product, "packages", "eval", "code-roi", "v2");
-  const { deliveredBlockFor, listedFilesOf } = await import(join(v2, "delivered-block.mjs"));
+  const { listedFilesOf } = await import(join(v2, "delivered-block.mjs"));
   const { buildGraph, promptFor } = await import(join(v2, "run-arms.mjs"));
   const { scenarioRoot } = await import(join(v2, "scenario-root.mjs"));
   const { diffForTree } = await import(join(v2, "diff-side.mjs"));
@@ -348,7 +349,7 @@ async function main() {
     const dir = join(out, "trees", s.parent);
     const { tree, graphRoot } = treeFor(repo, s, dir);
     await buildGraph(tree, graphRoot);
-    const block = await deliveredBlockFor(s, tree, graphRoot, promptFor(s));
+    const block = await blockWithoutLoadSilence({ cgDist, scenarioRoot, listedFilesOf, tree, graphRoot, prompt: promptFor(s) });
     const graph = JSON.parse(readFileSync(join(graphRoot, "graphify-out", "graph.json"), "utf8"));
     const inGraph = new Set((graph.nodes ?? []).map((n) => n.source_file).filter(Boolean));
     const truth = s.truth ?? [];
@@ -386,6 +387,8 @@ async function main() {
     const both = [...withName, ...byHistory.map((h) => h.file)];
     row.danglingImports = danglingImports(s.diff, s.file, files);
     row.delivered = block !== null;
+    row.blockMs = block?.tookMs ?? null;
+    row.overBudget = block?.overBudget ?? false;
     row.basis = block?.basis ?? null;
     row.changedSymbols = block?.changedSymbols ?? [];
     row.distinctiveNames = names;
@@ -445,6 +448,40 @@ async function main() {
   const report = summarize(rows, { surface, surfaceMatches, scenarios: scenarios.length });
   writeFileSync(join(out, "edge-sources.json"), JSON.stringify({ report, rows }, null, 2));
   process.stdout.write(`\n${formatReport(report)}\n`);
+}
+
+/**
+ * `deliveredBlockFor`, with the lane's time budget lifted.
+ *
+ * The prompt lane returns silence when the block takes longer than 120 ms
+ * (`prompt-impact.ts`, BUDGET_MS). On the idle machine the run was measured on
+ * that almost never fires; here, next to a miner running four test suites, it
+ * fired at random — one scenario was silent in one run and delivered in the
+ * next (09-23). Silence from load is a property of the machine, not of the
+ * block, so the budget is lifted and the time is recorded instead
+ * (`overBudget`), which keeps "would the real lane have been late" visible.
+ * Everything else is the same call with the same arguments.
+ */
+const LANE_BUDGET_MS = 120;
+async function blockWithoutLoadSilence({ cgDist, scenarioRoot, listedFilesOf, tree, graphRoot, prompt }) {
+  const { codeAwarenessDisabledByEnv } = await import(join(cgDist, "enabled-repos.js"));
+  if (codeAwarenessDisabledByEnv()) throw new Error("BASTRA_CODE_AWARENESS=off — every block would be silent; unset it");
+  const { CodeGraphCache } = await import(join(cgDist, "cache.js"));
+  const { promptImpactNote } = await import(join(cgDist, "prompt-impact.js"));
+  const repo = scenarioRoot(tree, graphRoot);
+  const cache = new CodeGraphCache();
+  await cache.ensureLoaded(repo);
+  const result = await promptImpactNote({ prompt, cwd: repo, session: { shown: {} }, cache, budgetMs: 60_000 });
+  if (result.note === null) return null;
+  const n = result.note;
+  return {
+    note: n.note,
+    basis: n.basis,
+    changedSymbols: n.changedSymbols,
+    listed: listedFilesOf(n.note),
+    tookMs: n.tookMs,
+    overBudget: n.tookMs > LANE_BUDGET_MS,
+  };
 }
 
 /**
