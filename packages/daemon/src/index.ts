@@ -61,7 +61,7 @@ import {
 import { editMemoryHandler } from "./edit-memory-handler.js";
 import {
   documentTools,
-  FindDocumentArgs,
+  parseFindDocumentArgs,
   ReadDocumentArgs,
   OpenDocumentArgs,
   findDocument,
@@ -854,9 +854,13 @@ async function main(): Promise<void> {
     }
 
     if (name === "find_document") {
-      const parsed = FindDocumentArgs.safeParse(args);
-      if (!parsed.success) return errorResult(parsed.error.message);
-      const result = findDocument(search, vault, parsed.data);
+      let parsed;
+      try {
+        parsed = parseFindDocumentArgs(args);
+      } catch (err) {
+        return errorResult((err as Error).message);
+      }
+      const result = findDocument(search, vault, parsed);
       return {
         content: [
           { type: "text", text: JSON.stringify(result, null, 2) },

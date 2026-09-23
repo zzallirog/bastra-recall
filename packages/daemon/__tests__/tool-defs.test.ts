@@ -34,6 +34,43 @@ test("ALL_TOOL_DEFS contains the core memory tools", () => {
   }
 });
 
+test("recall schema is query XOR queries, not required:[query]", () => {
+  const recall = tool("recall");
+  const schema = recall.inputSchema as {
+    required?: string[];
+    anyOf?: { required?: string[] }[];
+    properties?: { k?: { minimum?: number; maximum?: number }; queries?: unknown };
+  };
+  assert.ok(
+    !schema.required?.includes("query"),
+    "required:[query] traps batch mode: clients that honor it send query+queries, then the handler rejects both",
+  );
+  const anyOf = schema.anyOf ?? [];
+  assert.ok(
+    anyOf.some((s) => s.required?.includes("query")) && anyOf.some((s) => s.required?.includes("queries")),
+    "schema must advertise both query and queries as valid exclusive shapes",
+  );
+  assert.equal(schema.properties?.k?.minimum, 1);
+  assert.equal(schema.properties?.k?.maximum, 20);
+  assert.ok(schema.properties?.queries, "queries is a first-class argument, not an undocumented extra");
+});
+
+test("find_document k range is in the schema, not only in the description", () => {
+  const find = tool("find_document");
+  const k = find.inputSchema.properties?.k as { minimum?: number; maximum?: number } | undefined;
+  assert.equal(k?.minimum, 1);
+  assert.equal(k?.maximum, 5);
+});
+
+test("recall description names no_home — the skill points agents there", () => {
+  const recall = (ALL_TOOL_DEFS as { name: string; description?: string }[]).find((d) => d.name === "recall");
+  assert.match(
+    recall?.description ?? "",
+    /no_home/,
+    "skill says 'weak_result / no_home signals: recall tool description' — the description must actually name no_home",
+  );
+});
+
 test("save_memory declares body as a required string (#132 guarantee)", () => {
   const save = tool("save_memory");
   assert.equal(save.inputSchema.properties?.body?.type, "string", "body must be a string property");

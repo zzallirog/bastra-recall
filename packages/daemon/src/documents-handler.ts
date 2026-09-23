@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { z } from "zod";
 import type { Vault, SearchIndex } from "@bastra-recall/core";
+import { invalidToolArgs } from "./invalid-args.js";
 
 // ─── Argument schemas ───────────────────────────────────────────
 
@@ -26,6 +27,13 @@ export const ReadDocumentArgs = z.object({
 export const OpenDocumentArgs = z.object({
   id: z.string().min(1),
 });
+
+/** Shared parse so MCP stdio and HTTP dump the same one-line error, not Zod JSON. */
+export function parseFindDocumentArgs(raw: unknown): z.infer<typeof FindDocumentArgs> {
+  const parsed = FindDocumentArgs.safeParse(raw);
+  if (!parsed.success) throw new Error(invalidToolArgs("find_document", parsed.error));
+  return parsed.data;
+}
 
 // ─── Tool definitions for ListTools response ─────────────────────
 
@@ -56,6 +64,8 @@ export const documentTools = [
         },
         k: {
           type: "number",
+          minimum: 1,
+          maximum: 5,
           description: "Max hits (1–5, default 3).",
         },
       },

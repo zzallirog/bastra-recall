@@ -42,6 +42,7 @@ import {
   repairCallCorruption,
   requiredFieldsOf,
 } from "./call-corruption.js";
+import { invalidToolArgs } from "./invalid-args.js";
 
 // Re-exported so the 18 existing importers keep their import path.
 export type { ToolDeps };
@@ -147,7 +148,7 @@ export async function loadMemoryHandler(
   ctx?: { sessionId?: string | null } & PrivateAccess,
 ): Promise<LoadMemoryResult> {
   const parsed = LoadMemoryArgs.safeParse(rawArgs);
-  if (!parsed.success) throw new Error(parsed.error.message);
+  if (!parsed.success) throw new Error(invalidToolArgs("load_memory", parsed.error));
 
   // Commons-Fallback: persönlicher Vault gewinnt; nur wenn die ID dort
   // nicht existiert, wird im read-only Commons-Index nachgeschlagen.

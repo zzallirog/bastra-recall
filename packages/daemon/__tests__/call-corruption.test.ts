@@ -31,7 +31,11 @@ const CORRUPTED_MOVE = {
 
 test("every declared tool contributes its own required fields", () => {
   const recall = TOOL_ARG_EXPECTATIONS.get("recall");
-  assert.deepEqual(recall?.required, ["query"]);
+  // query XOR queries — neither is always required. A top-level
+  // required:["query"] made batch `queries` a schema lie.
+  // Revert-check: restore required:["query"] in tool-defs-memory.ts → this
+  // deepEqual([], …) turns red.
+  assert.deepEqual(recall?.required, []);
   assert.equal(recall?.readOnly, true);
 
   const save = TOOL_ARG_EXPECTATIONS.get("save_memory");

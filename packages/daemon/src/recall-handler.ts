@@ -21,6 +21,7 @@ import { fuseCommonsHits } from "./commons-fusion.js";
 import { expandQuery } from "./learned-recall/bridges.js";
 import { mergeBatchResults, dedupeQueries, batchDuplicateNote } from "./recall-batch.js";
 import { fitRecallToBudget } from "./recall-budget.js";
+import { invalidToolArgs } from "./invalid-args.js";
 import type { ToolDeps } from "./tool-deps.js";
 import type { PrivateAccess } from "./private-access.js";
 
@@ -284,7 +285,7 @@ async function recallAgainstVault(
   } & PrivateAccess = {},
 ): Promise<RecallResult & { stages?: RecallStageTimings }> {
   const parsed = RecallArgs.safeParse(rawArgs);
-  if (!parsed.success) throw new Error(parsed.error.message);
+  if (!parsed.success) throw new Error(invalidToolArgs("recall", parsed.error));
 
   // #351 batch mode: run each phrasing through the full single pipeline
   // (own recall_id + telemetry — the reach-join and bridge minting key on

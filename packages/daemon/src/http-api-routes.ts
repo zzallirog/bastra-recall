@@ -12,7 +12,7 @@ import {
   type ToolDeps,
 } from "./tool-handlers.js";
 import {
-  FindDocumentArgs,
+  parseFindDocumentArgs,
   ReadDocumentArgs,
   OpenDocumentArgs,
   findDocument,
@@ -161,9 +161,7 @@ export async function dispatchApi(
       return result;
     }
     case "find_document": {
-      const parsed = FindDocumentArgs.safeParse(body);
-      if (!parsed.success) throw new Error(parsed.error.message);
-      return findDocument(search, vault, parsed.data);
+      return findDocument(search, vault, parseFindDocumentArgs(body));
     }
     case "read_document": {
       const parsed = ReadDocumentArgs.safeParse(body);

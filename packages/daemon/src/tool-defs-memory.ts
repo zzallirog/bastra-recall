@@ -69,7 +69,12 @@ export const MEMORY_TOOL_DEFS: ToolDef[] = [
       "not a similarity — a top hit is high by construction. When the " +
       "response carries top-level `weak_result: true`, no returned hit has " +
       "a recall_when or title match: the high scores are likely " +
-      "rank-1-of-nothing, so prefer not to load them.\n" +
+      "rank-1-of-nothing, so prefer not to load them. A stricter sibling, " +
+      "`no_home: true`, means the top hit lives in only one arm — the " +
+      "shape a genuinely absent fact takes. It only appears together with " +
+      "`weak_result`; skip those hits too.\n" +
+      "\n" +
+      "Pass `query` or `queries` (2-4 distinct phrasings), never both.\n" +
       "\n" +
       "recall returns lean CANDIDATES (no bodies). This is step 1 of a " +
       "two-step flow: call load_memory ONLY for the hits you actually " +
@@ -110,6 +115,8 @@ export const MEMORY_TOOL_DEFS: ToolDef[] = [
         },
         k: {
           type: "number",
+          minimum: 1,
+          maximum: 20,
           description: "Max results (default 5, range 1-20).",
         },
         max_tokens: {
@@ -161,7 +168,11 @@ export const MEMORY_TOOL_DEFS: ToolDef[] = [
             "no-match signal.",
         },
       },
-      required: ["query"],
+      // query XOR queries — neither is always required. A top-level
+      // required:["query"] made batch `queries` schema-invalid, and
+      // sending both (to satisfy required + use batch) hit the handler's
+      // "pass query OR queries, not both".
+      anyOf: [{ required: ["query"] }, { required: ["queries"] }],
     },
   },
   {
