@@ -109,13 +109,13 @@ The five transcript chains this run, from `queue.json` (session basenames recove
 
 | session | query (paraphrased) | class | why |
 | --- | --- | --- | --- |
-| `01958311…` | "даю тебе рут права. исследуй нагрузку, прешуре и кеши…" | **unknown** | opaque evidence, `sourceRef: null` |
-| `14bf9698…` | one word "реколл" | **unknown** | evidence *resolved*; recall_id joined no pool in-window |
-| `0ddc2762…` | "найди сессию где vbios прошивали… закинь ключём в 192.168.100.155" | **unknown** (NEW) | same join-gap shape as `14bf9698` |
-| `33687af9…` | "они не сохранены нигде?" | served-hit | pool joined, target vault-object |
-| `33687af9…` | "…введёшь пароль в роутер и попробуешь оптимизировать…" | external-source | pool joined, target external-read |
+| `01958311…` | a "root granted — investigate load, pressure and caches" request | **unknown** | opaque evidence, `sourceRef: null` |
+| `14bf9698…` | a single word: the tool's own name | **unknown** | evidence *resolved*; recall_id joined no pool in-window |
+| `0ddc2762…` | "find the session where the vbios was flashed", then an scp to a host on the LAN | **unknown** (NEW) | same join-gap shape as `14bf9698` |
+| `33687af9…` | "aren't these saved anywhere?" | served-hit | pool joined, target vault-object |
+| `33687af9…` | "log into the router and try to tune it" | external-source | pool joined, target external-read |
 
-### 4a. `01958311…` ("даю рут") — opaque, not Bash
+### 4a. `01958311…` (the "root granted" chain) — opaque, not Bash
 
 This is the baseline §4 chain #1 (its pool `observedAt` is `2026-09-16T13:53:45Z`, the same
 timestamp the baseline named). Its target is `{kind: "unresolved", sourceRef: null}` — the pool
@@ -123,8 +123,8 @@ timestamp the baseline named). Its target is `{kind: "unresolved", sourceRef: nu
 first tool call after the recall result is:
 
 ```
-mcp__bastra-recall__load_memory  input: {"ids": "[\"chrome-socks5-launchagent-ssh-socks5-tunnel-inactive-placeholder-host\"]"}
-mcp__bastra-recall__load_memory  input: {"id":  "chrome-socks5-launchagent-ssh-socks5-tunnel-inactive-placeholder-host"}
+mcp__bastra-recall__load_memory  input: {"ids": "[\"<note-id>\"]"}
+mcp__bastra-recall__load_memory  input: {"id":  "<note-id>"}
 ```
 
 The **first** call uses a malformed `ids` key (plural, value a stringified array) instead of the
@@ -135,7 +135,7 @@ are downstream of an already-opaque slot and are never reached. The Bash recogni
 is structurally irrelevant to this chain. Fixing it would require parsing the malformed `ids`
 shape (or the model not emitting it) — which `2d282ac` explicitly does not do.
 
-### 4b. `14bf9698…` ("реколл") — join/coverage gap, evidence already resolves
+### 4b. `14bf9698…` (the one-word chain) — join/coverage gap, evidence already resolves
 
 Baseline §4 chain #2. Its target is `{kind: "unresolved", sourceRef:
 "sha256:d768e19e…"}` — `sourceRef` is **non-null**: the evidence step *did* resolve. The raw
@@ -165,7 +165,7 @@ chains 5 / joined 5;  pools recall 18 / hook 929
 
 With the wider window, **all five transcript chains join**, and `unknown` collapses to **1** —
 and that surviving one is `01958311…`, the opaque `sourceRef: null` chain from 4a. This is the
-clean proof: `14bf9698` (реколл) and `0ddc2762` (vbios) are `unknown` under `--since 3` purely
+clean proof: `14bf9698` (the one-word chain) and `0ddc2762` (the vbios chain) are `unknown` under `--since 3` purely
 because their pools sit at the window boundary; widen the window and they reclassify to
 `served-hit`. The only *structurally* unknown transcript chain in either window is the opaque
 malformed-`load_memory` one — which the Bash fix does not touch.
@@ -214,7 +214,7 @@ opaque `01958311…` specimen (target `unresolved`/`sourceRef: null`), not a Bas
   reclassification.
 - It does **not** claim recall missed anything real in the three `unknown` chains. `01958311…`
   is undetermined by construction (opaque evidence). `14bf9698…` and `0ddc2762…` actually
-  *resolved* their evidence (реколл loaded `windows-profile-migration-toolkit-compat-decisions`)
+  *resolved* their evidence (the one-word chain loaded a vault note)
   and both join and reclassify to `served-hit` under `--since 4` — they are pool-window
   artifacts, not misses.
 - This is **not a byte-identical reproduction** of the baseline. Live telemetry appended between
