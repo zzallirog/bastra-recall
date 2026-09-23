@@ -352,6 +352,119 @@ test("A8: a scoped query is not truncated by the global vector cut", async (t) =
   assert.ok(hits.every((h) => h.id.startsWith("small-")));
 });
 
+test("A7: a damped winner outside the raw hop-seed window still serves as top-1", async (t) => {
+  // rankBm25 used to slice MiniSearch to HOP_SEED_POOL = max(k*4, 20) BEFORE
+  // damping. A7 moved the k-cut after damping, but left this 20-cap in front
+  // of it: a fresh hit at raw rank 21 could never displace 20 expired ones.
+  // Revert-check: restore `filtered.slice(0, HOP_SEED_POOL)` before
+  // applyStaleness in rankBm25 → this test goes red (top-1 is an expired id).
+  const files: Record<string, string> = {
+    "fresh.md": memoryMd("fresh-lo", { updated: "2026-07-01", marker: "ANCHORWORD" }),
+  };
+  for (let i = 0; i < 20; i++) {
+    const n = String(i).padStart(2, "0");
+    files[`e${n}.md`] = memoryMd(`expired-${n}`, {
+      updated: "2020-01-01",
+      marker: "ANCHORWORD ANCHORWORD",
+    });
+  }
+  const { search } = await vaultWith(t, files);
+
+  // k=25 → HOP_SEED_POOL = 100, so damping sees every match and the fresh
+  // note is the true top-1. k=1 → HOP_SEED_POOL = 20, which used to cut the
+  // fresh note out before damping. Same winner, or the 20-cap is still there.
+  const wide = search.recall("ANCHORWORD", { k: 25 });
+  assert.equal(
+    wide[0].id,
+    "fresh-lo",
+    `precondition: a window that includes the fresh note must promote it (got ${wide[0].id})`,
+  );
+
+  const top1 = search.recall("ANCHORWORD", { k: 1 });
+  assert.equal(top1.length, 1);
+  assert.equal(
+    top1[0].id,
+    "fresh-lo",
+    `k=1 must serve the same damped winner as the wide window (got ${top1[0].id})`,
+  );
+});
+
+test("A7: hybrid damping also sees fused hits past the hop-seed window", async (t) => {
+  // Same window as the BM25 A7 case, on the fused path: outFull used to
+  // `break` at HOP_SEED_POOL before applyStaleness. Stub embeddings give
+  // every note the same vector, so both arms rank the expired notes first
+  // and the fresh note sits at fused rank 21 — outside the cap, inside a
+  // k=25 window.
+  // Revert-check: restore `if (outFull.length >= HOP_SEED_POOL) break` in
+  // recallHybrid → this test goes red (k=1 is an expired id).
+  const files: Record<string, string> = {
+    "fresh.md": memoryMd("fresh-lo", { updated: "2026-07-01", marker: "ANCHORWORD" }),
+  };
+  for (let i = 0; i < 20; i++) {
+    const n = String(i).padStart(2, "0");
+    files[`e${n}.md`] = memoryMd(`expired-${n}`, {
+      updated: "2020-01-01",
+      marker: "ANCHORWORD ANCHORWORD",
+    });
+  }
+  const { dir, vault, search, track } = await vaultWith(t, files);
+  const emb = track(new EmbeddingIndex(vault, new StubProvider(), path.join(dir, ".bastra", "e.json")));
+  await emb.start();
+  await flush(emb);
+  search.useEmbeddings(emb);
+
+  const wide = await search.recallHybrid("ANCHORWORD", { k: 25 });
+  assert.equal(
+    wide[0].id,
+    "fresh-lo",
+    `precondition: a window that includes the fresh note must promote it (got ${wide[0].id})`,
+  );
+  const top1 = await search.recallHybrid("ANCHORWORD", { k: 1 });
+  assert.equal(top1[0].id, "fresh-lo", `k=1 must agree with the wide fused window (got ${top1[0].id})`);
+});
+
+test("equal BM25 scores break ties by id ascending, not index insertion order", async (t) => {
+  // Two notes with identical searchable text. Vault init inserts in path
+  // order (`1-zeta.md` before `2-alpha.md`), so a score-only stable sort
+  // keeps zeta first. The ranking function must name the tie-break: id
+  // ascending, so alpha wins.
+  // Revert-check: sort by score only in applyStaleness → this test goes red
+  // (order becomes zeta, alpha).
+  const body = (id: string) => `---
+id: ${id}
+title: TIEWORD
+type: lesson
+summary: TIEWORD summary
+topic_path: [t]
+tags: [t]
+scope: t
+recall_when: ["TIEWORD"]
+created: 2026-07-01
+updated: 2026-07-01
+---
+
+Body TIEWORD shared.
+`;
+  const { search } = await vaultWith(t, {
+    "1-zeta.md": body("zeta"),
+    "2-alpha.md": body("alpha"),
+  });
+
+  const first = search.recall("TIEWORD", { k: 2 });
+  const second = search.recall("TIEWORD", { k: 2 });
+  assert.equal(first[0].score, first[1].score, "precondition: the two hits must tie on score");
+  assert.deepEqual(
+    first.map((h) => h.id),
+    ["alpha", "zeta"],
+    "tied scores must sort by id ascending",
+  );
+  assert.deepEqual(
+    second.map((h) => h.id),
+    first.map((h) => h.id),
+    "the same query twice must return the same order",
+  );
+});
+
 test("B1/A7: MCP progress never moves backwards, on any path", async (t) => {
   // The A7 reorder put staleness.rank ahead of hops.expand, but
   // RECALL_STAGE_ORDER still listed hops.expand first — so progressIndexFor()

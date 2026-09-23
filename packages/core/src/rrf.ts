@@ -81,3 +81,21 @@ export const RRF_K = 5;
  * is.
  */
 export const RRF_SCALE = (5000 * (RRF_K + 1)) / 61;
+
+/**
+ * Ranking comparator: higher score first, then id ascending.
+ *
+ * Score-only sorts are stable, so equal scores kept insertion order — MiniSearch
+ * result order, vault path order, or `fuseRRF`'s "BM25 arm first". That is
+ * deterministic for one process, but it is not a declared tie-break: two
+ * one-armed rank-1 hits have the same RRF (~81.967) and silently ranked by
+ * which arm inserted them. Id is the one field every hit already has.
+ */
+export function compareByScoreThenId(
+  a: { score: number; id: string },
+  b: { score: number; id: string },
+): number {
+  const d = b.score - a.score;
+  if (d !== 0) return d;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}

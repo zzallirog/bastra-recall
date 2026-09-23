@@ -20,7 +20,7 @@ import * as path from "node:path";
 import type { Memory } from "./schema.js";
 import type { Vault, VaultEvent } from "./vault.js";
 import { EmbedCache, embedBody, hashEmbedContent } from "./embed-cache.js";
-import { RRF_K, RRF_SCALE } from "./rrf.js";
+import { RRF_K, RRF_SCALE, compareByScoreThenId } from "./rrf.js";
 // #493: Die Provider stehen seit dem 800-Zeilen-Schnitt daneben. Re-exportiert,
 // damit jeder bestehende Import aus `embeddings.js` unverändert weiterläuft.
 import type { EmbeddingProvider } from "./embedding-providers.js";
@@ -232,7 +232,7 @@ export class EmbeddingIndex {
       if (otherId === id) continue;
       hits.push({ id: otherId, score: cosine(seed, v) });
     }
-    hits.sort((a, b) => b.score - a.score);
+    hits.sort(compareByScoreThenId);
     return hits.slice(0, k);
   }
 
@@ -298,7 +298,7 @@ export class EmbeddingIndex {
     for (const [id, v] of this.vectors) {
       hits.push({ id, score: cosine(q, v) });
     }
-    hits.sort((a, b) => b.score - a.score);
+    hits.sort(compareByScoreThenId);
     return {
       outcome: "hits",
       hits: hits.slice(0, k),
@@ -643,7 +643,7 @@ export interface FusedEntry {
 // below and every existing importer are unaffected. (Imported at the top of
 // the file too — a bare `export … from` would not put RRF_K in local scope,
 // and `fuseRRF` uses it as a default parameter.)
-export { RRF_K, RRF_SCALE };
+export { RRF_K, RRF_SCALE, compareByScoreThenId };
 
 /**
  * Reciprocal-Rank-Fusion aus BM25-Hits und Vector-Hits. Höherer RRF-Score =

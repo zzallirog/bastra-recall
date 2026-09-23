@@ -196,6 +196,7 @@ export {
   fuseRRF,
   RRF_K,
   RRF_SCALE,
+  compareByScoreThenId,
 } from "./embeddings.js";
 export type {
   EmbeddingProvider,

@@ -62,3 +62,17 @@ test("fuseRRF: structural anchors — rank1+rank1 ceiling ≈163.934, one-arm �
   assert.equal(oneArm.rank_vector, null);
   assert.ok(Math.abs(oneArm.score * RRF_SCALE - 81.967) < 0.01, "rank 1 in a single arm sits near 82");
 });
+
+test("fuseRRF: a BM25-only rank-1 and a vector-only rank-1 are a true score tie", () => {
+  // The two one-armed ceilings are the same number (~81.967). Without an
+  // id tie-break the Map insertion order (BM25 arm first) silently decides.
+  // Revert-check: this pins the arithmetic; the ranking-order equal-score
+  // test goes red if applyStaleness sorts by score only.
+  const fused = fuseRRF(["zeta"], ["alpha"]);
+  const z = fused.get("zeta")!;
+  const a = fused.get("alpha")!;
+  assert.equal(z.rank_vector, null);
+  assert.equal(a.rank_bm25, null);
+  assert.ok(Math.abs(z.score - a.score) < 1e-12, "one-armed rank-1 is the same RRF value in either arm");
+  assert.ok(Math.abs(z.score * RRF_SCALE - 81.967) < 0.01);
+});

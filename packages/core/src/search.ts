@@ -1,7 +1,7 @@
 import type { Memory } from "./schema.js";
 import type { Vault, VaultEvent } from "./vault.js";
 import type { EmbeddingIndex } from "./embeddings.js";
-import { fuseRRF, RRF_SCALE } from "./embeddings.js";
+import { fuseRRF, RRF_SCALE, compareByScoreThenId } from "./embeddings.js";
 import type { RecallStage, StageListener } from "./recall-stages.js";
 import { normalizeQuery, tokenizeWithIdentifiers } from "./query-normalize.js";
 import { PHRASE_STOPWORDS, MIN_SIGNIFICANT_TOKEN_LEN } from "./stopwords.js";
@@ -798,11 +798,17 @@ export class SearchIndex {
     /** Gefaltete Query-Terme für den exakten Anker — siehe `matchedRecallWhen`. */
     queryTerms: ReadonlySet<string>,
   ): { ranked: RecallHit[]; pool: RecallHit[] } {
-    // Pool-Size für Hop-Seeds: max(k*4, 20). Multi-Hop soll Nachbarn auch
-    // für Hits sehen, die knapp unter dem k-Cut liegen — sonst gehen die
-    // related_via-Kanten der Positionen 6–20 verloren.
+    // Pool-Size für Hop-Seeds und den Harvest-Callback: max(k*4, 20).
+    // Multi-Hop soll Nachbarn auch für Hits sehen, die knapp unter dem k-Cut
+    // liegen — sonst gehen die related_via-Kanten der Positionen 6–20 verloren.
+    //
+    // Damping runs on the FULL MiniSearch match list, then we cut. Slicing to
+    // HOP_SEED_POOL first reopened A7 at the window edge: a fresh hit at raw
+    // rank 21 could never displace 20 expired notes inside the cap (expired
+    // ×0.2). Hop seeds still take the raw MiniSearch head — their scores must
+    // not already carry the seed's own multiplier (see A7 hop compounding).
     const HOP_SEED_POOL = Math.max(k * 4, 20);
-    const directFull: RecallHit[] = filtered.slice(0, HOP_SEED_POOL).map((r) => ({
+    const directFull: RecallHit[] = filtered.map((r) => ({
       id: r.id as string,
       title: r.title as string,
       type: r.type as string,
@@ -834,6 +840,7 @@ export class SearchIndex {
     // seeds first compounded the multiplier — a neighbour behind an expired
     // seed was multiplied twice (0.2 × 0.2), dropping a fresh neighbour to 4%
     // of its raw score and below downstream floors.
+    const hopSeeds = directFull.slice(0, HOP_SEED_POOL);
     const tStale = stage.start("staleness.rank");
     const rankedFull = this.applyStaleness(directFull.map((h) => ({ ...h })), opts);
     const direct = rankedFull.slice(0, k);
@@ -844,17 +851,19 @@ export class SearchIndex {
     // rohen Scores raus, während die servierten Hits gedämpft waren — zwei
     // Skalen in derselben Telemetrie, und da das Damping umsortiert, kippte
     // auch die Reihenfolge gegen die servierte. Die Hop-Seeds hängen NICHT am
-    // Callback (sie greifen unten direkt auf `directFull` zu), der Pool darf
-    // hier also gedämpft sein; `rankedFull` ist derselbe tiefe Pool.
-    opts.onCandidatePool?.(rankedFull);
+    // Callback (sie greifen unten auf den RAW MiniSearch-Kopf zu), der Pool
+    // darf hier also gedämpft sein. Cap at HOP_SEED_POOL so a common-term
+    // query does not dump the whole vault into harvest.
+    const pool = rankedFull.slice(0, HOP_SEED_POOL);
+    opts.onCandidatePool?.(pool);
 
     let ranked: RecallHit[];
     if (opts.expand_hops === 1) {
       const tHops = stage.start("hops.expand");
-      // Seeded from the RAW pool; each neighbour is damped exactly once, by
-      // its own multiplier.
+      // Seeded from the RAW MiniSearch head; each neighbour is damped exactly
+      // once, by its own multiplier.
       const neighbors = this.applyStaleness(
-        this.collectOneHopNeighbors(directFull, opts, new Set(direct.map((h) => h.id))),
+        this.collectOneHopNeighbors(hopSeeds, opts, new Set(direct.map((h) => h.id))),
         opts,
       ).slice(0, k);
       stage.end("hops.expand", tHops, { hop_count: neighbors.length });
@@ -864,7 +873,7 @@ export class SearchIndex {
     }
     // #365/5: der Pool geht mit zurück, damit der Caller ihn in den
     // Query-Cache legen und bei einem Hit erneut ausliefern kann.
-    return { ranked, pool: rankedFull };
+    return { ranked, pool };
   }
 
   /** Hybrid-Recall: BM25 + Vector via Reciprocal-Rank-Fusion. Wenn kein
@@ -1178,12 +1187,15 @@ export class SearchIndex {
     const bm25Lookup = new Map(bm25Top.map((r) => [r.id as string, r]));
     const vectorLookup = new Map(vectorTop.map((v) => [v.hit.id, v]));
 
-    const sorted = Array.from(fused.entries()).sort((a, b) => b[1].score - a[1].score);
-    // Größerer Pool für Hop-Seeds (siehe recall()-Kommentar).
+    const sorted = Array.from(fused.entries()).sort((a, b) =>
+      compareByScoreThenId({ id: a[0], score: a[1].score }, { id: b[0], score: b[1].score }),
+    );
+    // Größerer Pool für Hop-Seeds (siehe recall()-Kommentar). Damping runs
+    // on the full fused set (≤100 from the 50+50 arm caps) before the k-cut —
+    // the same A7 window the BM25 path had at HOP_SEED_POOL.
     const HOP_SEED_POOL = Math.max(k * 4, 20);
     const outFull: RecallHit[] = [];
     for (const [id, entry] of sorted) {
-      if (outFull.length >= HOP_SEED_POOL) break;
       const bm = bm25Lookup.get(id);
       const v = vectorLookup.get(id);
       const mem = v?.mem ?? this.vault.get(id);
@@ -1232,13 +1244,14 @@ export class SearchIndex {
     // #121: expose the deeper pool (incl. below-floor candidates) before slicing to k.
     // #365/16: gedämpfter Pool, hinter dem Damping — gleiche Skala und gleiche
     // Reihenfolge wie die servierten Hits (siehe rankBm25).
-    opts.onCandidatePool?.(rankedFull);
+    const pool = rankedFull.slice(0, HOP_SEED_POOL);
+    opts.onCandidatePool?.(pool);
 
     let ranked: RecallHit[];
     if (opts.expand_hops === 1) {
       const tHops = stage.start("hops.expand");
       const neighbors = this.applyStaleness(
-        this.collectOneHopNeighbors(outFull, opts, new Set(out.map((h) => h.id))),
+        this.collectOneHopNeighbors(outFull.slice(0, HOP_SEED_POOL), opts, new Set(out.map((h) => h.id))),
         opts,
       ).slice(0, k);
       stage.end("hops.expand", tHops, { hop_count: neighbors.length });
@@ -1247,7 +1260,7 @@ export class SearchIndex {
       ranked = out;
     }
 
-    this.storeQueryCache(cacheKey, ranked, rankedFull);
+    this.storeQueryCache(cacheKey, ranked, pool);
 
     stage.emit("done", recallStart, {
       hit_count: ranked.length,
@@ -1309,7 +1322,7 @@ export class SearchIndex {
         });
       }
     }
-    return Array.from(best.values()).sort((a, b) => b.score - a.score);
+    return Array.from(best.values()).sort(compareByScoreThenId);
   }
 
   loadFull(id: string): Memory | undefined {
@@ -1400,8 +1413,8 @@ export class SearchIndex {
     }
     const direct = hits.filter((h) => h.hop !== "1-hop");
     const hops = hits.filter((h) => h.hop === "1-hop");
-    direct.sort((a, b) => b.score - a.score);
-    hops.sort((a, b) => b.score - a.score);
+    direct.sort(compareByScoreThenId);
+    hops.sort(compareByScoreThenId);
     return [...direct, ...hops];
   }
 
@@ -1742,7 +1755,7 @@ export function applyStalenessMultiplier(
   // bleiben aber Gruppe — wir sortieren INNERHALB jeder Gruppe.
   const direct = hits.filter((h) => h.hop !== "1-hop");
   const hops = hits.filter((h) => h.hop === "1-hop");
-  direct.sort((a, b) => b.score - a.score);
-  hops.sort((a, b) => b.score - a.score);
+  direct.sort(compareByScoreThenId);
+  hops.sort(compareByScoreThenId);
   return [...direct, ...hops];
 }
