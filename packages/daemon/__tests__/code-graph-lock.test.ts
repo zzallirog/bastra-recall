@@ -208,6 +208,30 @@ describe("the build lock against adversarial interleavings", () => {
     assert.equal(await readLock(dir), null, "a late release must free the lock at once");
   });
 
+  it("a throwing onRenew does not surface an unhandledRejection", async (t) => {
+    // Revert-check: remove the try/catch around onRenew() and the `.catch`
+    // on the interval's renew() promise → this test sees unhandled.length >= 1.
+    const dir = await tempDir("bastra-lock-onrenew-");
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown) => {
+      unhandled.push(err);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    t.after(() => process.off("unhandledRejection", onUnhandled));
+    const mine = await acquireRepoLock(dir, {
+      renewMs: 5,
+      onRenew: () => {
+        throw new Error("observer boom");
+      },
+    });
+    assert.ok(mine !== null);
+    await sleep(40);
+    await mine.release();
+    await sleep(10);
+    assert.equal(unhandled.length, 0, `unhandledRejection: ${String(unhandled[0])}`);
+  });
+
   it("keeps numeric generation markers bounded across normal acquire/release cycles", async (t) => {
     const dir = await tempDir("bastra-lock-generations-");
     t.after(() => rm(dir, { recursive: true, force: true }));

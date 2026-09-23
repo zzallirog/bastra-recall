@@ -359,7 +359,7 @@ function makeLock(
   // alive — a CLI build must be able to exit the moment the build is done.
   let timer = heartbeat
     ? setInterval(() => {
-        if (live !== null) beating = renew(live, record, onRenew);
+        if (live !== null) beating = renew(live, record, onRenew).catch(() => {});
       }, renewMs)
     : null;
   timer?.unref?.();
@@ -510,7 +510,12 @@ async function renew(
   } catch {
     /* a missed beat is not worth failing over: the next one renews the lease */
   }
-  onRenew?.();
+  try {
+    onRenew?.();
+  } catch {
+    /* observers must not reject the lease — the interval would otherwise
+     * surface an unhandledRejection (the contract is "renew never rejects") */
+  }
 }
 
 

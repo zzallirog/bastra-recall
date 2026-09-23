@@ -104,7 +104,11 @@ export function startVaultReconcile(vault: Vault): NodeJS.Timeout | null {
   const reconcileMs = envInt("BASTRA_VAULT_RECONCILE_MS", 60_000);
   if (reconcileMs <= 0) return null;
   const timer = setInterval(() => {
-    void vault.reconcile().catch(() => {});
+    void vault.reconcile().catch((err) => {
+      console.error(
+        `[bastra-recall] vault reconcile failed (non-fatal): ${(err as Error)?.message ?? err}`,
+      );
+    });
   }, reconcileMs);
   timer.unref();
   return timer;
@@ -175,7 +179,11 @@ function startIdleWatchdog(deps: BackgroundJobDeps): void {
       console.error(
         `[bastra-recall] idle for ${idleLabel} — self-terminating (respawns on next recall)`,
       );
-      void deps.shutdown();
+      void deps.shutdown().catch((err) => {
+        console.error(
+          `[bastra-recall] idle shutdown failed (non-fatal): ${(err as Error)?.message ?? err}`,
+        );
+      });
     }
   }, tick).unref();
 }
@@ -192,7 +200,11 @@ function startStagedRestart(deps: BackgroundJobDeps): void {
       console.error(
         "[bastra-recall] staged update applied — idle restart to load the new code (#81); launchd respawns",
       );
-      void deps.shutdown();
+      void deps.shutdown().catch((err) => {
+        console.error(
+          `[bastra-recall] staged-update restart failed (non-fatal): ${(err as Error)?.message ?? err}`,
+        );
+      });
     }
   }, 60_000).unref();
 }
@@ -214,22 +226,28 @@ function startOllamaUnload(deps: BackgroundJobDeps): void {
     const lastUse = deps.embIdx()?.runtimeHealth().lastOkAt ?? bootAt;
     if (lastUse > lastUnloadAt && Date.now() - lastUse >= ollamaUnloadMs) {
       lastUnloadAt = Date.now();
-      void unloadOllamaModel(ollama.baseURL, ollama.model).then((ok) => {
-        // #493: Grundwahrheit vor Schätzung — nur ein geglückter Unload sagt,
-        // dass das Modell wirklich draußen ist.
-        if (ok) deps.onModelUnloaded?.();
-        return deps.telemetry.logOllamaLifecycle({
-          action: "unload",
-          model: ollama.model,
-          ok,
-          // #495: Beim Unload gibt es nur zwei Ausgänge — er lief oder er
-          // scheiterte. Das Feld steht trotzdem, damit ein Leser nicht je
-          // nach `action` die Semantik wechseln muss.
-          outcome: ok ? "fired" : "failed",
-          last_embed_age_ms: Date.now() - lastUse,
-          embed_calls_since_boot: deps.embIdx()?.providerCallCount() ?? null,
+      void unloadOllamaModel(ollama.baseURL, ollama.model)
+        .then((ok) => {
+          // #493: Grundwahrheit vor Schätzung — nur ein geglückter Unload sagt,
+          // dass das Modell wirklich draußen ist.
+          if (ok) deps.onModelUnloaded?.();
+          return deps.telemetry.logOllamaLifecycle({
+            action: "unload",
+            model: ollama.model,
+            ok,
+            // #495: Beim Unload gibt es nur zwei Ausgänge — er lief oder er
+            // scheiterte. Das Feld steht trotzdem, damit ein Leser nicht je
+            // nach `action` die Semantik wechseln muss.
+            outcome: ok ? "fired" : "failed",
+            last_embed_age_ms: Date.now() - lastUse,
+            embed_calls_since_boot: deps.embIdx()?.providerCallCount() ?? null,
+          });
+        })
+        .catch((err) => {
+          console.error(
+            `[bastra-recall] ollama idle-unload tick failed (non-fatal): ${(err as Error)?.message ?? err}`,
+          );
         });
-      });
     }
   }, 60_000).unref();
 }
