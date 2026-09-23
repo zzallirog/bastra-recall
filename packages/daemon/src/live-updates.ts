@@ -126,6 +126,8 @@ export function createLiveUpdates(
   handleUiUpdates: (req: IncomingMessage, res: ServerResponse, settingsPath?: string) => Promise<void>;
   notifyRead: (id: string, band?: RecallBand) => void;
   stop: () => void;
+  /** Open debounce windows — bounded by `maxEntries`. Exposed for tests. */
+  pendingCount: () => number;
 } {
   const debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
   const maxEntries = opts.maxEntries ?? MAX_ENTRIES;
@@ -196,6 +198,23 @@ export function createLiveUpdates(
       }
       cur.timer = setTimeout(() => finalize(next.id), Math.min(debounceMs, remaining));
     } else {
+      // Distinct-id bursts (an import of thousands) used to open one timer
+      // apiece with no cap. The finalized ring is 500; pending was not.
+      // Measured: 10k adds / 60s debounce → +18 MB heap, 10k live timers.
+      if (pending.size >= maxEntries) {
+        let oldestId: string | null = null;
+        let oldestAt = Infinity;
+        for (const [id, p] of pending) {
+          if (p.firstAt < oldestAt) {
+            oldestAt = p.firstAt;
+            oldestId = id;
+          }
+        }
+        if (oldestId !== null) {
+          clearTimeout(pending.get(oldestId)!.timer);
+          finalize(oldestId);
+        }
+      }
       pending.set(next.id, {
         update: next,
         count: 1,
@@ -284,5 +303,5 @@ export function createLiveUpdates(
     pending.clear();
   };
 
-  return { handleUiUpdates, notifyRead, stop };
+  return { handleUiUpdates, notifyRead, stop, pendingCount: () => pending.size };
 }

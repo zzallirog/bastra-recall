@@ -465,3 +465,34 @@ test("live updates: an area born after page load arrives WITH its grouping (#307
     await h.cleanup();
   }
 });
+
+test("live updates: 10k distinct adds keep pending at maxEntries (not 10k timers)", () => {
+  // Revert-check: remove the `pending.size >= maxEntries` finalize-oldest
+  // branch in ingest → pendingCount() after 10k adds is 10000, not 32.
+  const listeners: Array<(e: { kind: string; memory: unknown }) => void> = [];
+  const fakeVault = {
+    root: "/tmp/vault",
+    on(fn: (e: { kind: string; memory: unknown }) => void) {
+      listeners.push(fn);
+      return () => undefined;
+    },
+    get() {
+      return undefined;
+    },
+  } as unknown as Vault;
+  const maxEntries = 32;
+  const live = createLiveUpdates(fakeVault, { debounceMs: 60_000, maxEntries, maxWaitMs: 60_000 });
+  const mem = (id: string) => ({
+    filePath: `/tmp/vault/memories/projects/p/${id}.md`,
+    fm: { id, title: id, type: "reference", scope: "p", summary: "s", tags: [], topic_path: [], recall_when: [] },
+  });
+  try {
+    for (let i = 0; i < 10_000; i++) {
+      listeners[0]!({ kind: "add", memory: mem(`id-${i}`) });
+    }
+    assert.ok(live.pendingCount() <= maxEntries, `pending grew to ${live.pendingCount()}`);
+    assert.equal(live.pendingCount(), maxEntries);
+  } finally {
+    live.stop();
+  }
+});

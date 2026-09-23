@@ -61,6 +61,11 @@ const RECALL_FOLLOWUP_WINDOW_MS = 5 * 60 * 1000;
  * Claude to load the memory — that round-trip can take a few minutes.
  */
 const HOOK_HINT_WINDOW_MS = 10 * 60 * 1000;
+/** Live maps had a TTL on restore, none on the write path. 10k rotateTurn
+ *  grew `turns` to 10k / +8 MB; 10k recordHookHints grew `hookHints` to 10k.
+ *  FIFO of insertion order — a long-lived daemon cannot accumulate sessions. */
+export const MAX_TURN_TRACES = 256;
+export const MAX_HOOK_HINTS = 4096;
 
 interface HookHintTrace {
   recall_id: string;
@@ -276,6 +281,13 @@ export class Telemetry {
         score: typeof hit.score === "number" ? hit.score : null,
         ts,
       });
+      if (this.hookHints.size > MAX_HOOK_HINTS) {
+        const first = this.hookHints.keys().next().value;
+        if (first !== undefined && first !== hit.id) this.hookHints.delete(first);
+      }
+    }
+    for (const [id, trace] of this.hookHints) {
+      if (ts - trace.ts > HOOK_HINT_WINDOW_MS) this.hookHints.delete(id);
     }
     // Deliberately NO usage emission here: these are the engine's raw top-k.
     // The hook CLIs drop hits client-side (score floors, #110/#148 scope
@@ -393,6 +405,18 @@ export class Telemetry {
       started_at: Date.now(),
     };
     this.turns.set(sessionId, trace);
+    if (this.turns.size > MAX_TURN_TRACES) {
+      const first = this.turns.keys().next().value;
+      if (first !== undefined && first !== sessionId) this.turns.delete(first);
+    }
+    const ttl = Math.max(HOOK_HINT_WINDOW_MS, ACTED_ON_WINDOW_MS);
+    const now = Date.now();
+    for (const [sid, t] of this.turns) {
+      if (now - t.started_at > ttl) this.turns.delete(sid);
+    }
+    for (const sid of this.adoptedTurnKeys.keys()) {
+      if (!this.turns.has(sid)) this.adoptedTurnKeys.delete(sid);
+    }
     this.latestTurn = trace;
     this.scheduleFlush();
     return trace.turn_id;
