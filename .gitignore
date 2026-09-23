@@ -104,5 +104,8 @@ packages/daemon/stub/bastra-hook.partial
 packages/daemon/stub/checksums/
 packages/daemon/stub/manifest.json
 
+# рабочие/вложенные клоны, не часть репо
+_related/
+
 # Graphify code graph (local only, see #574)
 graphify-out/
