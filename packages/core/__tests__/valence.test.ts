@@ -226,4 +226,13 @@ test("staleness #365/14: ein unbekanntes touch sagt mit und ohne valid_until das
     "expired",
     "ein abgelaufenes valid_until gewinnt vor dem touch-Guard",
   );
+  // Off-by-one: `now.getTime() >= validUntil`, not `>`. At the exact instant
+  // the date parses to, the memory is already expired.
+  // Revert-check: change `>=` to `>` on the validUntil branch in
+  // computeStaleness → this assertion goes red (status becomes aging/fresh).
+  assert.equal(
+    computeStaleness({ type: "lesson", updated: "2026-08-01", valid_until: "2026-08-23" }, now),
+    "expired",
+    "valid_until equal to now is expired, not still-fresh",
+  );
 });
