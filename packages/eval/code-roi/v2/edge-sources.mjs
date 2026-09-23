@@ -52,6 +52,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { documentFrequency, tokenEvents, tokenLines } from "./token-history.mjs";
+import { functionHistoryLines } from "./function-history.mjs";
 
 /** #628's guard: a name shorter than this matches too much to mean a caller. */
 export const MIN_NAME_LENGTH = 8;
@@ -320,6 +321,13 @@ async function main() {
   const { deliveredBlockFor, listedFilesOf } = await import(join(v2, "delivered-block.mjs"));
   const { buildGraph, promptFor } = await import(join(v2, "run-arms.mjs"));
   const { scenarioRoot } = await import(join(v2, "scenario-root.mjs"));
+  const { diffForTree } = await import(join(v2, "diff-side.mjs"));
+  const cgDist = join(product, "packages", "daemon", "dist", "code-graph");
+  const { loadGraph } = await import(join(cgDist, "reader.js"));
+  const { changedSymbolsOf } = await import(join(cgDist, "affected.js"));
+  // Optional, diagnostic: test -> file -> functions that RAN (lab #629, fold-fn.mjs). Folded at ONE later
+  // commit, so it knows tests' behaviour from after the scenario: an upper bound, never the proposal.
+  const coverageMap = argOf("--coverage-map") === null ? null : JSON.parse(readFileSync(argOf("--coverage-map"), "utf8"));
   const { deliveredSurfaceHashesFromDist } = await import(join(v2, "build-pin.mjs"));
   const registration = JSON.parse(
     readFileSync(join(product, "packages", "eval", "registrations", "code-awareness-delivered.json"), "utf8"),
@@ -397,6 +405,25 @@ async function main() {
       diag_name_uncapped: scoreArm([...listed, ...byNameAll.map((h) => h.file)], truth, listed),
       diag_history_any: scoreArm([...withName, ...byHistoryAny.map((h) => h.file)], truth, listed),
     };
+    // Function grain: the functions the diff touches, as the product resolves them on the parent's graph.
+    const loadedGraph = await loadGraph(scenarioRoot(tree, graphRoot));
+    const changedFns = loadedGraph.ok
+      ? [...new Set(changedSymbolsOf(loadedGraph.graph, s.file, diffForTree(s.diff, "old")).map((c) => c.name))]
+      : [];
+    const byFn = functionHistoryLines({ repo, parent: s.parent, file: s.file, functions: changedFns, skip: new Set(listed) });
+    row.changedFunctions = changedFns;
+    row.byFunctionHistory = byFn.lines;
+    row.functionCommits = byFn.commits;
+    row.arms.graph_fn_history = scoreArm([...listed, ...byFn.lines.map((h) => h.file)], truth, listed);
+    if (coverageMap !== null) {
+      const bare = new Set(changedFns.map((n) => String(n).replace(/\(\)$/, "").split(".").pop()));
+      const existing = new Set(files.keys());
+      const ran = Object.entries(coverageMap)
+        .filter(([t, byFile]) => existing.has(t) && (byFile[s.file] ?? []).some((f) => bare.has(f)))
+        .map(([t]) => t);
+      row.byCoverage = ran;
+      row.arms.diag_fn_coverage = scoreArm([...listed, ...ran], truth, listed);
+    }
     const closure = staticClosureArm(s);
     if (closure !== null) row.arms.diag_static_closure = closure;
     row.tokens = {
