@@ -51,6 +51,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { documentFrequency, tokenEvents, tokenLines } from "./token-history.mjs";
 
 /** #628's guard: a name shorter than this matches too much to mean a caller. */
 export const MIN_NAME_LENGTH = 8;
@@ -302,6 +303,8 @@ async function main() {
   const scenarios = loadScenarios({ scenarios: argOf("--scenarios"), candidates: argOf("--candidates") });
   mkdirSync(out, { recursive: true });
   const historyCache = new Map();
+  // One walk of `git log -p` for all scenarios; each reads only what came before its own commit.
+  const events = tokenEvents(repo, "HEAD");
   const rows = [];
   for (const s of scenarios) {
     // Keyed by the parent commit, not the id: the tree and its graph depend on
@@ -328,6 +331,16 @@ async function main() {
     const skipH = new Set([target, ...listed, ...byName.map((h) => h.file)]);
     const byHistory = historyLines({ counts, file: target, keep: (p) => !inGraph.has(p), skip: skipH });
     const byHistoryAny = historyLines({ counts, file: target, keep: () => true, skip: skipH });
+    // Commits strictly before the scenario's own commit; the commit itself is its answer sheet.
+    const upTo = (events.index.get(s.commit) ?? 0) - 1;
+    const byToken = tokenLines({
+      events,
+      upTo,
+      changedFile: target,
+      diff: s.diff,
+      docFreq: documentFrequency(files),
+      skip: new Set([...listed, ...byName.map((h) => h.file)]),
+    });
     // The graph's whole candidate list, before the display cap of ten: the
     // product's own `find_affected_files` answer at the same depth.
     const graphAll = block === null ? [] : await graphCandidates(product, scenarioRoot(tree, graphRoot), block, target);
@@ -344,11 +357,14 @@ async function main() {
     row.byName = byName;
     row.byHistory = byHistory;
     row.byHistoryAny = byHistoryAny;
+    row.byToken = byToken;
     row.arms = {
       graph: scoreArm(listed, truth, listed),
       graph_name: scoreArm(withName, truth, listed),
       graph_history: scoreArm(withHistory, truth, listed),
       graph_name_history: scoreArm(both, truth, listed),
+      graph_token: scoreArm([...listed, ...byToken.map((h) => h.file)], truth, listed),
+      graph_name_token: scoreArm([...withName, ...byToken.map((h) => h.file)], truth, listed),
       diag_graph_uncapped: scoreArm(graphAll, truth, listed),
       diag_name_uncapped: scoreArm([...listed, ...byNameAll.map((h) => h.file)], truth, listed),
       diag_history_any: scoreArm([...withName, ...byHistoryAny.map((h) => h.file)], truth, listed),
@@ -367,7 +383,7 @@ async function main() {
     process.stdout.write(
       `${s.id} ${block === null ? "silent" : `${listed.length} listed`} truth=${truth.length} ` +
         `graph=${row.arms.graph.covers ? 1 : 0} +name=${row.arms.graph_name.covers ? 1 : 0} ` +
-        `+hist=${row.arms.graph_history.covers ? 1 : 0}\n`,
+        `+hist=${row.arms.graph_history.covers ? 1 : 0} +token=${row.arms.graph_token.covers ? 1 : 0}\n`,
     );
   }
 
