@@ -268,7 +268,9 @@ async function main() {
   const historyCache = new Map();
   const rows = [];
   for (const s of scenarios) {
-    const dir = join(out, "trees", s.id);
+    // Keyed by the parent commit, not the id: the tree and its graph depend on
+    // nothing else, and ids shift whenever a scenario is added or dropped.
+    const dir = join(out, "trees", s.parent);
     const { tree, graphRoot } = treeFor(repo, s, dir);
     await buildGraph(tree, graphRoot);
     const block = await deliveredBlockFor(s, tree, graphRoot, promptFor(s));
@@ -320,7 +322,10 @@ async function main() {
       graph: block === null ? 0 : Math.ceil(block.note.length / 4),
       graph_name_history: block === null ? 0 : Math.ceil(renderWithSources(block.note, byName, byHistory).length / 4),
     };
-    if (block !== null) writeFileSync(join(dir, "block-with-sources.txt"), renderWithSources(block.note, byName, byHistory));
+    if (block !== null) {
+      const name = `block-${s.file.replace(/[^\w.-]+/g, "_")}.txt`;
+      writeFileSync(join(dir, name), renderWithSources(block.note, byName, byHistory));
+    }
     rows.push(row);
     process.stdout.write(
       `${s.id} ${block === null ? "silent" : `${listed.length} listed`} truth=${truth.length} ` +
