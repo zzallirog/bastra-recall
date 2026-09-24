@@ -45,11 +45,7 @@ test("recall schema is query XOR queries, not required:[query]", () => {
     !schema.required?.includes("query"),
     "required:[query] traps batch mode: clients that honor it send query+queries, then the handler rejects both",
   );
-  const anyOf = schema.anyOf ?? [];
-  assert.ok(
-    anyOf.some((s) => s.required?.includes("query")) && anyOf.some((s) => s.required?.includes("queries")),
-    "schema must advertise both query and queries as valid exclusive shapes",
-  );
+  assert.ok(!schema.required?.includes("queries"), "queries is not always required either");
   assert.equal(schema.properties?.k?.minimum, 1);
   assert.equal(schema.properties?.k?.maximum, 20);
   assert.ok(schema.properties?.queries, "queries is a first-class argument, not an undocumented extra");
@@ -181,4 +177,15 @@ test("the refusal names the surface and how to widen it", () => {
   assert.match(msg, /archive_memory/);
   assert.match(msg, /"write"/, "the agent must be able to name the active surface to the user");
   assert.match(msg, /BASTRA_TOOL_SURFACE/, "and how to widen it");
+});
+
+test("no tool schema carries a top-level combinator (anyOf/oneOf/allOf)", () => {
+  // The Anthropic API rejects anyOf/oneOf/allOf at the top level of a tool
+  // input_schema; one such tool fails the whole tool list a client sends.
+  // Revert-check: put anyOf:[{required:["query"]},{required:["queries"]}]
+  // back on recall → this test names recall.
+  const bad = (ALL_TOOL_DEFS as ToolDef[])
+    .filter((d) => ["anyOf", "oneOf", "allOf"].some((k) => k in (d.inputSchema as Record<string, unknown>)))
+    .map((d) => d.name);
+  assert.deepEqual(bad, []);
 });

@@ -168,11 +168,11 @@ export const MEMORY_TOOL_DEFS: ToolDef[] = [
             "no-match signal.",
         },
       },
-      // query XOR queries — neither is always required. A top-level
-      // required:["query"] made batch `queries` schema-invalid, and
-      // sending both (to satisfy required + use batch) hit the handler's
-      // "pass query OR queries, not both".
-      anyOf: [{ required: ["query"] }, { required: ["queries"] }],
+      // query XOR queries — neither is always required, so no `required`.
+      // A top-level required:["query"] made batch `queries` schema-invalid.
+      // Not anyOf/oneOf either: the Anthropic API rejects combinators at the
+      // top level of a tool input_schema, which would drop every tool of this
+      // server. The handler enforces the XOR and names it in its error.
     },
   },
   {

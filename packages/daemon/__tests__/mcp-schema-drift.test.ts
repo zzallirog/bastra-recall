@@ -44,8 +44,8 @@ test("recall MCP schema allows queries without query (XOR, not required:[query])
     !schema.required?.includes("query"),
     "required:[query] is the trap: honor it and send both, handler rejects both",
   );
-  const shapes = (schema.anyOf ?? []).flatMap((s) => s.required ?? []);
-  assert.ok(shapes.includes("query") && shapes.includes("queries"));
+  assert.equal(schema.anyOf, undefined, "no top-level anyOf: the Anthropic API rejects it and drops the server's tools");
+  assert.ok(!schema.required?.includes("queries"), "queries is not always required either");
   assert.equal(schema.properties?.k?.minimum, 1);
   assert.equal(schema.properties?.k?.maximum, 20);
 });
