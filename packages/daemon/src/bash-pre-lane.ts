@@ -752,6 +752,7 @@ export async function runBashPreLane(payload: BashHookPayload, selfBaseUrl: stri
       settings_verdict: settings.verdict,
       settings_rule: settings.rule ?? null,
       hinted: offLine !== "",
+      dimensions: dimensionsFrom({ client: clientEvidence, hook_source: "bash-pre", session_id: payload.session_id, agent }),
     });
   }
   const text = offLine ? block.replace(/<\/recall-hints>$/, `${offLine}\n</recall-hints>`) : block;
