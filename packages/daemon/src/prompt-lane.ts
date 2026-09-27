@@ -249,6 +249,8 @@ export function isTrivialPrompt(prompt: string): boolean {
   // body instead of user intent.
   if (SLASH_COMMAND_RE.test(trimmed) && !trimmed.includes("\n")) return true;
   if (trimmed.includes("<command-name>") || trimmed.startsWith("<local-command-")) return true;
+  // Background-task results arrive as a user turn nobody typed.
+  if (trimmed.startsWith("<task-notification>")) return true;
   // Bare ack / one-worder (trailing punctuation tolerated).
   const bare = trimmed.toLowerCase().replace(/[\s!.?…]+$/u, "");
   if (TRIVIAL_ACKS.has(bare)) return true;
