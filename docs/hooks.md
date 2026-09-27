@@ -342,8 +342,8 @@ that takes an argument (`xargs -E rm sh …` runs `sh`), `zsh -c` (it reads
 `git clean`, `rmdir`, deletes from code, and `rm` without `-r`/`-R` (no STOP,
 so no rewrite: it runs as the system's). Archiving is a move: it does not free
 disk space until the archive lets the entry go. The receipt shows the first
-25 targets of a call and counts the rest; the manifest is rotated once a day
-past 1 MB and a rotated one goes after 30 days once nothing in it is live. Other hooks' `deny` still wins over
+25 targets of a call and counts the rest; the manifest is rotated at a cleanup
+once it is past 1 MB and a rotated one goes after 30 days once nothing in it is live. Other hooks' `deny` still wins over
 this `allow`, and so do your own permission rules: the rewritten command keeps
 `rm …` on a line of its own, so `deny: Bash(rm:*)` still denies it and
 `ask: Bash(rm:*)` still asks. Off with `BASTRA_RM_SHIM=0`; a host that ships its own
@@ -855,6 +855,70 @@ Riskante Muster: `chmod -R`, `chown -R`, `find ... -exec rm`,
 `>`-Umleitung mit Überschreiben.
 
 Blockiert **nicht**. Der Agent entscheidet, ob er fortfährt.
+
+**Das archivierende `rm` (#650, Claude Code).** Bei einem Befehl, der nur aus
+`rm` besteht (schlicht, `command rm`, `xargs rm` mit Flags ohne Argument,
+`find … -exec rm`, ein `bash -c`/`sh -c` ohne Login-Shell mit demselben, dazu
+`cd`; keine Umleitung außer nach `/dev/null`), warnt der Hook nicht — er macht
+den Vorgang umkehrbar. Er antwortet mit `permissionDecision: "allow"` und einem
+`updatedInput`, das bastras `shims/rm` an den Anfang des `PATH` dieses Befehls
+setzt: Die Shell expandiert Globs und Variablen wie gewohnt, und der Shim
+verschiebt jedes Ziel nach `~/.bastra/archive/<Datum>/<Zeit-PID>/<voller Pfad>`,
+statt es zu löschen. Temp-Verzeichnisse (`/tmp`, `/var/tmp`, `$TMPDIR`, …)
+werden wirklich gelöscht; `/`, `~`, Systemverzeichnisse, die Temp-Wurzeln selbst
+und `.`/`..` werden abgelehnt. Ein Ziel auf einem anderen Dateisystem kommt nach
+`<Mount>/.bastra-archive`; wo sich keins anlegen lässt (ein schreibgeschütztes
+Volume), wird es abgelehnt und bleibt liegen. Der umgeschriebene Befehl läuft
+gar nicht, wenn `rm` in dieser Shell nicht der Shim ist (eine `rm()`-Funktion).
+Nach dem Befehl sagt der Post-Hook dem Agenten, was tatsächlich geschah
+(wohin archiviert, gelöscht, abgelehnt) und wie man es zurückholt:
+`bastra archive restore <Pfad>`. Alte Einträge gehen nach Klasse, geprüft
+höchstens stündlich nach einem Bash-Aufruf — Build-Müll nach 1 Tag, saubere,
+von git verfolgte Dateien nach 2, der Rest nach 2, mit einer Obergrenze von
+10 GB, die eigene Dateien jünger als ihre Aufbewahrung nie anrührt. Das Archiv
+ist ein Sicherheitsnetz für die nächsten Schritte, kein Backup; pro Klasse
+ändern (Tage, Brüche erlaubt) mit
+`bastra config set archive.retain junk=1,in-git=2,user=2` oder
+`BASTRA_ARCHIVE_RETAIN` (die Umgebung gewinnt). Claude Codes Scratchpads
+(`/tmp/claude-<uid>/…` oder unter `CLAUDE_CODE_TMPDIR`) gelten als Temp-Boden:
+wirklich gelöscht.
+
+Alles andere behält den STOP: ein Befehl, der `rm` mit anderer Arbeit mischt
+(das `allow` würde alles abdecken), eine Umleitung, die eine Datei schreibt, ein
+`xargs`-Flag mit Argument (`xargs -E rm sh …` startet `sh`), `zsh -c` (liest
+zuerst `~/.zshenv`), einer, der ändert, worauf `rm` auflöst (`PATH=`, `alias`,
+`hash -p`, eine `rm()`-Funktion, auch in `eval`), ein `rm … &` im Hintergrund
+(die Quittung käme vor dem Shim), `sudo rm`, `/bin/rm`, `rm` auf entfernten
+Rechnern und in Containern. Gar nicht abgedeckt: `find -delete`, `git clean`,
+`rmdir`, Löschen aus Code heraus und `rm` ohne `-r`/`-R` (kein STOP, also kein
+Umschreiben: es läuft als das des Systems). Archivieren ist ein Verschieben: Es
+gibt keinen Speicherplatz frei, bis das Archiv den Eintrag loslässt. Die
+Quittung zeigt die ersten 25 Ziele eines Aufrufs und zählt den Rest; das
+Manifest wird bei einer Aufräumrunde über 1 MB rotiert, und ein rotiertes geht
+nach 30 Tagen, sobald nichts darin mehr lebt. Das `deny` anderer Hooks gewinnt
+weiterhin über dieses `allow`, ebenso deine eigenen Berechtigungsregeln: Der
+umgeschriebene Befehl behält `rm …` auf einer eigenen Zeile, also verweigert
+`deny: Bash(rm:*)` weiterhin und `ask: Bash(rm:*)` fragt weiterhin. Aus mit
+`BASTRA_RM_SHIM=0`; ein Host mit eigenem archivierenden `rm` setzt stattdessen
+`BASTRA_RM_ARCHIVES=1` und bekommt den Quittungstext ohne Umschreiben. Daemon
+und Claude Code müssen sich eine Platte teilen: Ein Shim-Pfad, den der Client
+nicht sieht, lässt den Befehl scheitern, bevor er läuft (Exit 97).
+
+Abgeschaltet (`BASTRA_RM_SHIM=0`) bleibt der STOP — und bei einem Befehl, den
+der Shim genommen hätte (dieselbe Nur-`rm`-Entscheidung), bekommt der Block eine
+Zeile mehr: was der Shim mit diesem Befehl getan hätte (welche Ziele er
+wiederherstellbar verschoben hätte) und dass er standardmäßig an ist. Der
+Wortlaut folgt den eigenen Claude-Code-Regeln des Nutzers, deterministisch aus
+den Standarddateien gelesen (managed, `~/.claude/settings.json` oder
+`CLAUDE_CONFIG_DIR`, `.claude/settings.json` und `settings.local.json` des
+Projekts; deny > ask > allow, wie Claude Code entscheidet): Mit einer
+`ask`-Regel sagt sie, dass der Shim weiterhin fragen würde; eine `deny`-Regel
+bekommt keine Zeile, weil der Shim daran nichts geändert hätte. Mit
+`claude --settings` übergebene oder per `--setting-sources` eingeschränkte
+Dateien sieht ein Hook nicht. Jedes solche rm ist außerdem ein
+Telemetrie-Ereignis `rm_shim_shadow` (`matched_pattern, rm_only,
+settings_verdict, settings_rule, hinted`) — was der Ausschalter kostet, gezählt.
+Nichts geht in den Vault.
 
 Telemetrie: `bash_hook_call` mit `matched_pattern, severity, hit_count,
 top_score, status`.
