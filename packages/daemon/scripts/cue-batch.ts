@@ -242,6 +242,14 @@ async function main(): Promise<void> {
     if (armLost !== undefined) {
       throw new Error(`der Vektorarm ist während des Laufs ausgefallen (${armLost}) — kein Sidecar geschrieben`);
     }
+    // Ein Lauf, den die Bremse gestoppt hat oder der bei vorhandenen Memories
+    // nichts geschrieben hat, ist gescheitert (#427): das alte Sidecar bleibt.
+    if (!dryRun && (report.stopped_early || (report.memories_seen > 0 && report.cues_written === 0))) {
+      throw new Error(
+        `Lauf nicht erfolgreich (${report.stopped_early ? "von der Generierungsbremse gestoppt" : "keine Cues geschrieben"}) — ` +
+          `${JSON.stringify(report)} — bestehendes Sidecar unverändert`,
+      );
+    }
     if (!dryRun) await publishCueSidecar(partial, out, overwrite);
     console.error(`${TAG} ${JSON.stringify(report)}`);
     console.error(`${TAG} ${dryRun ? "dry-run, nichts geschrieben" : `${written} Cues → ${out}`}`);
