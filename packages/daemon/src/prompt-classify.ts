@@ -20,14 +20,16 @@ export interface ClaudeHookPayload {
 
 export type DetectedMode = "retrieval" | "assertion" | "none" | "generic";
 
-// DE + EN retrieval triggers — match the spec in Issue #33.
+// DE + EN retrieval triggers — match the spec in Issue #33. RU (F03): the same
+// request in Russian must land in the same mode, or it gets a different floor.
 const RETRIEVAL_DE = /^\s*(such|finde|wo (ist|sind)|wann (war|hatte)|wieviel|wie viel|was hab(e ich)?|was war)/i;
 const RETRIEVAL_EN = /^\s*(find|search|where (is|are)|when (was|did)|how much|what (did|was))/i;
+const RETRIEVAL_RU = /^\s*(найд[иё]\p{L}*|найти|ищи|поищи|где (лежит|лежат|находится|находятся|был[аио]?|были)|когда (был[аио]?|были|мы)|сколько|что (я|мы) (делал|делали|писал|писали)|что было)(?![\p{L}\p{N}])/iu;
 
 export function detectRetrieval(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return false;
-  return RETRIEVAL_DE.test(trimmed) || RETRIEVAL_EN.test(trimmed);
+  return RETRIEVAL_DE.test(trimmed) || RETRIEVAL_EN.test(trimmed) || RETRIEVAL_RU.test(trimmed);
 }
 
 // ─── assertion lane (#252) ───────────────────────────────────────────────────
@@ -50,17 +52,30 @@ export function detectRetrieval(prompt: string): boolean {
 const COMPOSE_VERB =
   /\b(draft|write|compose|announce|reply|respond|publish|schreib\w*|verfass\w*|formulier\w*|entwirf|entwerfe|antworte\w*|beantworte|ver(ö|oe)ffentlich\w*)\b/i;
 
+/** RU composing verbs (F03). `\b` is ASCII-only, so Cyrillic uses letter lookarounds. */
+const COMPOSE_VERB_RU =
+  /(?<![\p{L}\p{N}])(напиши\p{L}*|составь\p{L}*|сформулируй\p{L}*|набросай\p{L}*|подготовь\p{L}*|ответь\p{L}*|ответить|опубликуй\p{L}*|анонсируй\p{L}*)(?![\p{L}\p{N}])/iu;
+
 /** …that leaves this machine. `#123` counts: naming an issue is outward. */
 const OUTWARD_ARTIFACT =
   /(\B#\d+\b|\b(release[- ]?notes?|release-?notizen|changelog|(ä|ae)nderungsprotokoll|announcement|ank(ü|ue)ndigung|blog\w*|newsletter|readme|docs?|documentation|dokumentation|issue|pr|pull[- ]?requests?|comment|kommentar|reply|antwort|thread|discord|mail|e-?mail|posting|tweet|beitrag)\b)/i;
+
+const OUTWARD_ARTIFACT_RU =
+  /(?<![\p{L}\p{N}])(релиз-?нот\p{L}*|заметк\p{L}* к релизу|чейнджлог\p{L}*|список изменений|анонс\p{L}*|блог\p{L}*|рассылк\p{L}*|ридми|документаци\p{L}*|ишью|комментари\p{L}*|ответ\p{L}*|тред\p{L}*|дискорд\p{L}*|письм\p{L}*|почт\p{L}*|пост\p{L}*|твит\p{L}*)(?![\p{L}\p{N}])/iu;
 
 /** Asking for a state… */
 const STATE_QUESTION =
   /\b(what'?s|what is|how (far|many|much|good)|status|state|wie (ist|weit|viele?|gut)|stand|wo stehen wir)\b/i;
 
+const STATE_QUESTION_RU =
+  /(?<![\p{L}\p{N}])(какой|какая|какие|каков\p{L}*|статус\p{L}*|состояни\p{L}*|как (дела|далеко|хорошо)|сколько|насколько|где мы)(?![\p{L}\p{N}])/iu;
+
 /** …that this project has actually measured or recorded. */
 const PROJECT_STATE_NOUN =
   /\b(measured?|measurement|benchmark|eval|recall@\w*|numbers?|metrics?|coverage|latency|ceiling|zahlen|gemessen|messung|kennzahl\w*|milestone|roadmap|release|version|tests?)\b/i;
+
+const PROJECT_STATE_NOUN_RU =
+  /(?<![\p{L}\p{N}])(замер\p{L}*|измер\p{L}*|бенчмарк\p{L}*|метрик\p{L}*|цифр\p{L}*|покрыти\p{L}*|задержк\p{L}*|потолок|роадмап\p{L}*|веха|вех\p{L}*|верси\p{L}*|тест\p{L}*)(?![\p{L}\p{N}])/iu;
 
 /**
  * #252: does the prompt ask for an ASSERTION — outbound text, or a claim about
@@ -70,8 +85,10 @@ const PROJECT_STATE_NOUN =
 export function detectAssertion(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return false;
-  if (COMPOSE_VERB.test(trimmed) && OUTWARD_ARTIFACT.test(trimmed)) return true;
-  return STATE_QUESTION.test(trimmed) && PROJECT_STATE_NOUN.test(trimmed);
+  if ((COMPOSE_VERB.test(trimmed) || COMPOSE_VERB_RU.test(trimmed)) &&
+      (OUTWARD_ARTIFACT.test(trimmed) || OUTWARD_ARTIFACT_RU.test(trimmed))) return true;
+  return (STATE_QUESTION.test(trimmed) || STATE_QUESTION_RU.test(trimmed)) &&
+    (PROJECT_STATE_NOUN.test(trimmed) || PROJECT_STATE_NOUN_RU.test(trimmed));
 }
 
 // #151: trivial-prompt gate. Bare acks, one-worders and slash-command
