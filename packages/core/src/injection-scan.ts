@@ -51,6 +51,13 @@ const AI_INSTRUCTION: Pattern[] = [
   { category: "ai-instruction", re: /<\|im_start\|>|\[\/?INST\]|<<SYS>>/g },
   { category: "ai-instruction", re: /(?:^|\n)#{1,4}\s*(?:system\s+prompt|new\s+instructions?)\b/gi },
   { category: "ai-instruction", re: /do\s+not\s+(?:tell|inform|alert)\s+the\s+user/gi },
+  // The same "ignore your previous instructions" ask in the other languages
+  // this project is written in (S14). Distinctive verb + qualifier + object,
+  // like the English ones.
+  { category: "ai-instruction", re: /(?:ignorier|missachte|vergiss)\p{L}*\s+(?:alle\s+|jegliche\s+)?(?:vorherigen|vorigen|früheren|bisherigen|obigen|deine)\s+(?:anweisungen|instruktionen|regeln|befehle|vorgaben)/giu },
+  { category: "ai-instruction", re: /(?:игнорир|забуд|не\s+учитыва)\p{L}*\s+(?:все\s+|любые\s+|всё\s+)?(?:предыдущ|прежн|прошл|вышеуказанн|выш\p{L}+\s+)\p{L}*\s+(?:инструкци|указани|правил|команд|промпт)\p{L}*/giu },
+  { category: "ai-instruction", re: /ignora\s+(?:todas\s+)?(?:las\s+)?(?:instrucciones|indicaciones|reglas)\s+(?:anteriores|previas)/giu },
+  { category: "ai-instruction", re: /ignore[zr]?\s+(?:toutes\s+)?(?:les\s+)?(?:instructions|consignes|règles)\s+(?:précédentes|antérieures|ci-dessus)/giu },
 ];
 
 // Authority / urgency / pre-authorization framing.
@@ -80,6 +87,32 @@ const EXFIL: Pattern[] = [
 
 const ALL_PATTERNS: Pattern[] = [...AI_INSTRUCTION, ...AUTHORITY, ...EXFIL];
 
+// Look-alike letters that let "ignore" pass as "іgnоre" (S14). Applied only
+// inside a word that ALSO holds Latin letters, so genuine Cyrillic or Greek
+// text is left alone for the per-language patterns above.
+const CONFUSABLES: Readonly<Record<string, string>> = {
+  а: "a", е: "e", о: "o", р: "p", с: "c", х: "x", у: "y", і: "i", ј: "j", ѕ: "s", ԁ: "d", һ: "h", ԛ: "q", ԝ: "w",
+  А: "A", В: "B", Е: "E", К: "K", М: "M", Н: "H", О: "O", Р: "P", С: "C", Т: "T", Х: "X", І: "I",
+  α: "a", ο: "o", ρ: "p", ν: "v", ι: "i", τ: "t", Ο: "O", Α: "A", Β: "B", Ε: "E", Ι: "I", Κ: "K", Μ: "M", Ν: "N", Ρ: "P", Τ: "T", Χ: "X", Υ: "Y",
+};
+const INVISIBLE_RE = /[\u00AD\u200B-\u200D\u2060\uFEFF]/g;
+const LATIN_LETTER_RE = /\p{Script=Latin}/u;
+
+/**
+ * The text as the matchers should read it: fullwidth and compatibility forms
+ * folded (NFKC), invisible characters removed, and look-alike letters inside
+ * Latin words mapped to Latin. Identity for plain ASCII, so English matches
+ * and their offsets are unchanged.
+ */
+function foldForScan(text: string): string {
+  return text
+    .normalize("NFKC")
+    .replace(INVISIBLE_RE, "")
+    .replace(/[\p{L}\p{M}]+/gu, (word) =>
+      LATIN_LETTER_RE.test(word) ? word.replace(/[\u0370-\u03FF\u0400-\u04FF]/g, (c) => CONFUSABLES[c] ?? c) : word,
+    );
+}
+
 function excerptAt(text: string, index: number, matchLen: number): string {
   const start = Math.max(0, index - EXCERPT_CONTEXT);
   const end = Math.min(text.length, index + matchLen + EXCERPT_CONTEXT);
@@ -94,12 +127,15 @@ function excerptAt(text: string, index: number, matchLen: number): string {
 export function scanForInjection(text: string): InjectionFinding[] {
   if (typeof text !== "string" || text.length === 0) return [];
   const findings: InjectionFinding[] = [];
+  // The phrase patterns read the folded copy (their `index` points into it);
+  // the zero-width and base64 checks below read the text as delivered.
+  const folded = foldForScan(text);
 
   for (const p of ALL_PATTERNS) {
     p.re.lastIndex = 0;
     let m: RegExpExecArray | null;
-    while ((m = p.re.exec(text)) !== null && findings.length < MAX_FINDINGS) {
-      findings.push({ category: p.category, excerpt: excerptAt(text, m.index, m[0].length), index: m.index });
+    while ((m = p.re.exec(folded)) !== null && findings.length < MAX_FINDINGS) {
+      findings.push({ category: p.category, excerpt: excerptAt(folded, m.index, m[0].length), index: m.index });
       if (m.index === p.re.lastIndex) p.re.lastIndex++; // zero-width safety
     }
     if (findings.length >= MAX_FINDINGS) break;
