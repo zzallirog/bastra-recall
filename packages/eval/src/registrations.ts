@@ -305,6 +305,26 @@ export function checkCueRegistration(
  * `underpowered_fallback` wäre eine Lücke, die später als Versäumnis gelesen
  * würde statt als Befund.
  */
+
+/**
+ * #N16: a plain substring test for "not evaluable" accepts a rule that
+ * states the OPPOSITE ("never reported as not evaluable; reported as a null
+ * result instead") and rejects the repository's own verdict spellings
+ * (`not_evaluable`, NOT-EVALUABLE) because they use `_`/`-` instead of a
+ * space. Split the rule into clauses on sentence punctuation and
+ * and/und/aber/but, then require the verdict phrase to occur in a clause
+ * that carries none of the negation cues that would flip its meaning.
+ */
+function hasReportingRuleFor(rule: string): boolean {
+  const VERDICT_RX = /not[ _-]evaluable|nicht auswertbar/i;
+  const NEGATION_CUES = ["never", "isn't", "ignored", "ignoring", "ignores", "cannot", "no longer", "niemals", "ignoriert"];
+  const clauses = rule.split(/[.;,]|\s+\b(?:and|und|aber|but)\b\s+/i);
+  return clauses.some((clause) => {
+    if (!VERDICT_RX.test(clause)) return false;
+    const lower = clause.toLowerCase();
+    return !NEGATION_CUES.some((cue) => lower.includes(cue));
+  });
+}
 export function checkPresentationRegistration(
   requiredStage: CueStage = "structure_registered",
   reg: Record<string, unknown> = loadPresentationRegistration(),
@@ -382,7 +402,7 @@ export function checkPresentationRegistration(
       // (#442) — und eine Regel, die das Nicht-Auswertbar nicht nennt, ist
       // nicht die aus §18.1.
       const rule = conclusion.reporting_rule;
-      if (typeof rule !== "string" || !/NICHT AUSWERTBAR|not evaluable/i.test(rule.trim())) {
+      if (typeof rule !== "string" || !hasReportingRuleFor(rule.trim())) {
         issues.push({
           where: "underpowered_fallback",
           problem: "§18.1: an arm below its min-N is reported as NOT EVALUABLE, never as a null result — the rule belongs in the registration",
