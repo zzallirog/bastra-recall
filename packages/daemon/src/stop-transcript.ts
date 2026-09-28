@@ -140,6 +140,16 @@ export function normalizeTurns(items: unknown[]): TranscriptTurn[] {
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
     const obj = item as Record<string, unknown>;
+    // Claude Code marks the rows it writes itself — hook feedback ("Stop hook
+    // feedback: …"), skill bodies, caveats — with `isMeta: true`. They carry
+    // role "user" but no human typed them: the heuristics and the session
+    // harvest (#675, which quotes candidates as "the user said this") must not
+    // read them as the user. The prefix list in isInjectedSystemContent stays
+    // for clients that do not set the flag.
+    if (obj.isMeta === true) {
+      out.push({ role: "system-injected", content: "" });
+      continue;
+    }
     // Codex rollout JSONL wraps conversation messages as
     // `{type:"response_item", payload:{type:"message", role, content}}`.
     // Upstream documents this file format as unstable, so this parser remains
