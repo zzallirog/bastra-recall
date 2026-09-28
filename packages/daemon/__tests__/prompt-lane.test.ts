@@ -37,44 +37,31 @@ import {
 
 // ─── Pure unit tests ─────────────────────────────────────────────────────
 
-test("detectRetrieval — DE triggers match", () => {
+test("detectRetrieval — a question is retrieval, in every script", () => {
+  // The mode follows the shape of the prompt, not a DE/EN/RU word list.
   const cases = [
-    "such mal meinen Strafzettel",
-    "Suche nach Rechnungen von 2024",
-    "finde alle PDFs zum Mietvertrag",
     "wo ist meine Steuererklärung?",
-    "wo sind die Notizen vom Meeting?",
-    "wann war der letzte Arzttermin?",
     "wann hatte ich Urlaub im Juli?",
-    "wieviel habe ich für Strom bezahlt?",
-    "wie viel Miete im März?",
-    "was habe ich zum Architekt gesagt?",
-    "Was hab ich gestern gemacht?",
-    "was war der Stand bei der Steuer?",
-  ];
-  for (const c of cases) {
-    assert.equal(detectRetrieval(c), true, `expected retrieval match for: ${c}`);
-  }
-});
-
-test("detectRetrieval — EN triggers match", () => {
-  const cases = [
-    "find the parking ticket pdf",
-    "search invoices from last quarter",
-    "where is the lease agreement?",
     "where are the meeting notes?",
-    "when was the last vet visit?",
-    "when did I sign the contract?",
-    "how much did I spend on rent?",
     "what did I tell the architect?",
-    "what was the status on the tax filing?",
+    "где мой штрафной талон за парковку?",
+    "où est ma contravention de stationnement ?", // French space before "?"
+    "¿dónde dejamos el script de despliegue",
+    "gdzie jest mój mandat za parkowanie?",
+    "staging sunucusunun betiğini nereye koymuştuk?",
+    "ステージングのスクリプトはどこ？",
+    "预发布服务器的部署脚本放在哪儿了？",
+    "أين وضعنا سكربت النشر؟",
+    "איפה שמנו את הסקריפט?",
+    "γιατί πέφτει ο διακομιστής;", // Greek question mark typed as ";"
+    "**where** is it?**",
   ];
   for (const c of cases) {
     assert.equal(detectRetrieval(c), true, `expected retrieval match for: ${c}`);
   }
 });
 
-test("detectRetrieval — non-retrieval prompts skip", () => {
+test("detectRetrieval — no question, no retrieval mode: imperatives are score-gated in every language", () => {
   const cases = [
     "bitte schreib mir einen Hook",
     "implement a UserPromptSubmit handler",
@@ -86,6 +73,15 @@ test("detectRetrieval — non-retrieval prompts skip", () => {
     "ok",
     "go ahead",
     "machen wir das so",
+    // An imperative lookup used to be retrieval in de/en only; now it is
+    // generic everywhere — the score decides, not the language.
+    "find the parking ticket pdf",
+    "such mal meinen Strafzettel",
+    "найди мой штраф",
+    // Code and URLs are not questions.
+    "const x = a?.b ?? c",
+    "open https://example.net/search?q=deploy",
+    "Install it; then restart the daemon",
   ];
   for (const c of cases) {
     assert.equal(detectRetrieval(c), false, `expected NO retrieval match for: ${c}`);
@@ -94,44 +90,28 @@ test("detectRetrieval — non-retrieval prompts skip", () => {
 
 // ─── assertion lane (#252) ───────────────────────────────────────────────────
 
-test("detectAssertion — outbound writing requests match", () => {
+test("detectAssertion — a prompt that names an issue or pull request is outward, in any language", () => {
+  const cases = [
+    "verfasse einen Kommentar zu #257",
+    "draft a reply on #412",
+    "напиши ответ в #257",
+    "#257 にコメントを書いて",
+    "PR #1234 review",
+  ];
+  for (const c of cases) {
+    assert.equal(detectAssertion(c), true, `expected assertion match for: ${c}`);
+  }
+});
+
+test("detectAssertion — composing verbs and state nouns are no longer a (DE/EN/RU-only) signal", () => {
   const cases = [
     "draft a reply to zzallirog's field report",
     "write the release notes for v0.9",
-    "schreib mir bitte die Release Notes",
-    "verfasse einen Kommentar zu #257",
-    "antworte auf den Discord-Thread",
-    "compose an announcement for the blog",
-    "entwirf die PR description",
-    "beantworte die Mail",
-  ];
-  for (const c of cases) {
-    assert.equal(detectAssertion(c), true, `expected assertion match for: ${c}`);
-  }
-});
-
-test("detectAssertion — project-state questions match", () => {
-  const cases = [
-    "what's the state of our recall@pool measurement?",
     "how good are the eval numbers right now",
-    "wie ist der Stand beim v0.9 Milestone",
-    "wie viele Tests haben wir",
-  ];
-  for (const c of cases) {
-    assert.equal(detectAssertion(c), true, `expected assertion match for: ${c}`);
-  }
-});
-
-test("detectAssertion — a bare composing verb is not a trigger", () => {
-  // The lane that fires on every declarative prompt is the noise #252 warns
-  // about: two signals required, never the verb alone.
-  const cases = [
     "write a helper that parses the frontmatter",
-    "schreib die Funktion neu",
-    "draft the migration in typescript",
-    "fix the failing test",
-    "was hältst du davon",
-    "refactor curator.ts",
+    "color: #fff",
+    "see anchor #12a",
+    "## heading",
     "",
   ];
   for (const c of cases) {
@@ -140,10 +120,11 @@ test("detectAssertion — a bare composing verb is not a trigger", () => {
 });
 
 test("detectAssertion — retrieval wins the classification", () => {
-  // "how much …" is both; the hook checks retrieval first, so the lookup
-  // instruction is what the agent sees.
-  const prompt = "how much did the release cost";
+  // A question about an issue is both; the hook checks retrieval first, so the
+  // lookup instruction is what the agent sees.
+  const prompt = "what did we decide in #257?";
   assert.equal(detectRetrieval(prompt), true);
+  assert.equal(detectAssertion(prompt), true);
 });
 
 test("effectiveScoreFloor — assertion recalls at the retrieval floor, not the generic one", () => {
@@ -346,7 +327,7 @@ test("integration — retrieval prompt yields recall-hints block", async () => {
     const { stdout } = await runHook(
       {
         hook_event_name: "UserPromptSubmit",
-        prompt: "such mal meinen Strafzettel",
+        prompt: "wo ist mein Strafzettel?",
         cwd: process.cwd(),
       },
       { BASTRA_HTTP_URL: `http://127.0.0.1:${daemon.port}` },
@@ -365,7 +346,7 @@ test("integration — retrieval prompt yields recall-hints block", async () => {
     assert.ok(received, "mock daemon should have received request");
     const r = received as { url: string | undefined; body: { query: string; k: number } };
     assert.equal(r.url, "/hook/recall");
-    assert.equal(r.body.query, "such mal meinen Strafzettel");
+    assert.equal(r.body.query, "wo ist mein Strafzettel?");
     assert.equal(r.body.k, 5);
   } finally {
     await daemon.close();
@@ -610,18 +591,22 @@ test("integration — wrong hook_event_name emits empty object", async () => {
 
 // ─── #151: trivial-prompt gate ───────────────────────────────────────────
 
-test("isTrivialPrompt gates bare acks DE+EN (trailing punctuation tolerated)", () => {
-  for (const p of ["ok", "OK!", "ja", "Ja.", "danke", "passt", "yes", "thanks", "weiter", "nö", "go"]) {
+test("isTrivialPrompt gates two-letter acks in any script (trailing punctuation tolerated)", () => {
+  for (const p of ["ok", "OK!", "ja", "Ja.", "nö", "go", "да", "はい", "はい。", "うん"]) {
     assert.equal(isTrivialPrompt(p), true, `should gate: ${p}`);
   }
+  // A two-character Chinese or Korean word is content, not an ack.
+  for (const p of ["部署", "배포"]) assert.equal(isTrivialPrompt(p), false, `content: ${p}`);
 });
 
 test("#707 isTrivialPrompt: structural rules hold in every script; an unlisted ack takes the neutral path", () => {
   // no list needed: at most two characters, or no letter/digit at all
   for (const p of ["да", "ok", "👍👍", "!!!", "…", "🙏 🙏"]) assert.equal(isTrivialPrompt(p), true, `should gate: ${p}`);
-  // an ack in a language without a list runs one score-gated recall — the
-  // neutral direction, never a lost prompt
-  for (const p of ["спасибо", "tamam", "ευχαριστώ"]) assert.equal(isTrivialPrompt(p), false, `neutral path: ${p}`);
+  // a longer ack runs one score-gated recall in every language (no ack list) —
+  // the neutral direction, never a lost prompt
+  for (const p of ["danke", "thanks", "weiter", "спасибо", "tamam", "ευχαριστώ"]) {
+    assert.equal(isTrivialPrompt(p), false, `neutral path: ${p}`);
+  }
   // real prose in Russian, Turkish and Greek is never gated
   assert.equal(isTrivialPrompt("почему сервер падает ночью?"), false);
   assert.equal(isTrivialPrompt("veritabanı şifresi nerede?"), false);
@@ -721,7 +706,7 @@ test("integration — #161: retrieval lookup is NEVER suppressed, even in a hot 
     const { stdout } = await runHook(
       {
         hook_event_name: "UserPromptSubmit",
-        prompt: "such mal meinen Mietvertrag",
+        prompt: "wo ist mein Mietvertrag?",
         session_id: sessionId,
         cwd: process.cwd(),
       },
@@ -1373,7 +1358,7 @@ test("#539 — a suppressed prompt-lane emission books `skipped` into the saved 
     const { stdout } = await runHook(
       {
         hook_event_name: "UserPromptSubmit",
-        prompt: "schreib mir bitte die Release Notes",
+        prompt: "schreib mir bitte die Release Notes für #257",
         session_id: sessionId,
         cwd: process.cwd(),
       },
@@ -1441,7 +1426,7 @@ test("#539 — the suppression window re-opens: three skips, then a probe emit",
       const { stdout } = await runHook(
         {
           hook_event_name: "UserPromptSubmit",
-          prompt: "schreib mir bitte die Release Notes",
+          prompt: "schreib mir bitte die Release Notes für #257",
           session_id: sessionId,
           cwd: process.cwd(),
         },
@@ -1575,7 +1560,7 @@ test("#677 — Russian, French and Polish lookup prompts each reach recall and i
     "gdzie jest mój mandat za parkowanie?",
   ];
   for (const prompt of prompts) {
-    assert.equal(detectRetrieval(prompt), false, "the de/en regex does not know this language");
+    assert.equal(detectRetrieval(prompt), true, "a question is retrieval in every language");
     const stateDir = await mkdtemp(join(tmpdir(), "bastra-677-lang-"));
     const { daemon, bodies } = await startRecallMock({ hits: [STRONG_HIT] });
     try {
@@ -1586,7 +1571,7 @@ test("#677 — Russian, French and Polish lookup prompts each reach recall and i
       );
       assert.equal(bodies.length, 1, `recall ran for: ${prompt}`);
       assert.equal(bodies[0]!.query, prompt);
-      assert.equal(bodies[0]!.k, 3, "generic mode asks for the top tier only");
+      assert.equal(bodies[0]!.k, 5, "retrieval mode — the same as a German or English question");
       const ctx =
         (JSON.parse(stdout) as { hookSpecificOutput?: { additionalContext?: string } }).hookSpecificOutput
           ?.additionalContext ?? "";
@@ -1640,7 +1625,7 @@ test("#677 — unfused, the generic score gate cannot be read: no ordinary hit i
   });
   try {
     const { stdout } = await runHook(
-      { hook_event_name: "UserPromptSubmit", session_id: "s677u", prompt: "où est ma contravention ?", cwd: process.cwd() },
+      { hook_event_name: "UserPromptSubmit", session_id: "s677u", prompt: "montre-moi ma contravention", cwd: process.cwd() },
       { BASTRA_HTTP_URL: `http://127.0.0.1:${daemon.port}`, BASTRA_HOOK_STATE_DIR: stateDir },
     );
     assert.equal(stdout.trim(), "{}");
@@ -1655,7 +1640,7 @@ test("#677 — BASTRA_PROMPT_HOOK_MODE=retrieval-only keeps the old regex gate a
   const { daemon, bodies } = await startRecallMock({ hits: [STRONG_HIT] });
   try {
     const { stdout } = await runHook(
-      { hook_event_name: "UserPromptSubmit", session_id: "s677o", prompt: "où est ma contravention ?", cwd: process.cwd() },
+      { hook_event_name: "UserPromptSubmit", session_id: "s677o", prompt: "montre-moi ma contravention", cwd: process.cwd() },
       {
         BASTRA_PROMPT_HOOK_MODE: "retrieval-only",
         BASTRA_HTTP_URL: `http://127.0.0.1:${daemon.port}`,

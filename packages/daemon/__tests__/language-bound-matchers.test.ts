@@ -53,8 +53,6 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/daemon/src/learned-recall/language.ts :: latin [^a-zäöüß]": "#707 filing-folder detection only (a non-Latin query abstains → und)",
 
   // ── #707: per-language data with a documented neutral path — allowed shape ──
-  "packages/daemon/src/prompt-classify.ts :: name TRIVIAL_ACKS": "#707 union of per-language data; an unlisted ack runs one score-gated recall (neutral)",
-  "packages/daemon/src/prompt-classify.ts :: keyed TRIVIAL_ACKS_BY_LANGUAGE": "#707 per-language data; structural no-letter/≤2-char rule covers every script",
   "packages/daemon/src/lexicon.ts :: name DEFAULT_DECISION_CUES_BY_LANGUAGE": "#707 per-language data; stop-lane-choice.ts option pick is the neutral fallback",
   "packages/daemon/src/lexicon.ts :: keyed DEFAULT_DECISION_CUES_BY_LANGUAGE": "#707 per-language data with a neutral fallback (option pick)",
   "packages/daemon/src/lexicon.ts :: name DEFAULT_DECISION_CUES": "#707 flattened decision cues, neutral fallback exists",
@@ -72,30 +70,6 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/daemon/src/lexicon.ts :: keyed DEFAULT_FRUSTRATION_CUES_BY_LANGUAGE": "#678 per-language data with a neutral fallback",
   "packages/daemon/src/lexicon.ts :: name DEFAULT_FRUSTRATION_CUES": "#678 flattened frustration cues, neutral fallback exists",
 
-  // ── #677: the prompt-lane gate is language-neutral; these only label the mode ──
-  "packages/daemon/src/prompt-classify.ts :: name RETRIEVAL_DE": "#677 labels detected_mode/budget; recall no longer gated on it",
-  "packages/daemon/src/prompt-classify.ts :: name RETRIEVAL_EN": "#677 labels detected_mode/budget; recall no longer gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /such|finde|wo (ist|sind)/": "#677 RETRIEVAL_DE body",
-  "packages/daemon/src/prompt-classify.ts :: words /find|search|where (is|are)/": "#677 RETRIEVAL_EN body",
-  "packages/daemon/src/prompt-classify.ts :: words /ist|weit|viele?/": "#677 assertion label (STATE_QUESTION)",
-  "packages/daemon/src/prompt-classify.ts :: words /draft|write|compose/": "#677 assertion label (COMPOSE_VERB)",
-  "packages/daemon/src/prompt-classify.ts :: words /release[- ]?notes?|release-?notizen|changelog/": "#677 assertion label (OUTWARD_ARTIFACT)",
-  "packages/daemon/src/prompt-classify.ts :: words /what'?s|what is|how (far|many|much|good)/": "#677 assertion label (STATE_QUESTION)",
-  "packages/daemon/src/prompt-classify.ts :: words /far|many|much/": "#677 assertion label (STATE_QUESTION)",
-  "packages/daemon/src/prompt-classify.ts :: words /measured?|measurement|benchmark/": "#677 assertion label (PROJECT_STATE_NOUN)",
-  "packages/daemon/src/prompt-classify.ts :: name RETRIEVAL_RU": "#677 mode label (F03): Russian twin of RETRIEVAL_RU; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: name COMPOSE_VERB_RU": "#677 mode label (F03): Russian twin of COMPOSE_VERB; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: name OUTWARD_ARTIFACT_RU": "#677 mode label (F03): Russian twin of OUTWARD_ARTIFACT; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: name STATE_QUESTION_RU": "#677 mode label (F03): Russian twin of STATE_QUESTION; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: name PROJECT_STATE_NOUN_RU": "#677 mode label (F03): Russian twin of PROJECT_STATE_NOUN; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /лежит|лежат|находится/": "#677 mode label (F03): Russian twin of RETRIEVAL_RU body; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /делал|делали|писал/": "#677 mode label (F03): Russian twin of RETRIEVAL_RU body; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /найд[иё]\\p{L}*|найти|ищи/": "#677 mode label (F03): Russian twin of RETRIEVAL_RU body; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /напиши\\p{L}*|составь\\p{L}*|сформулируй\\p{L}*/": "#677 mode label (F03): Russian twin of COMPOSE_VERB_RU body; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /релиз-?нот\\p{L}*|заметк\\p{L}* к релизу|чейнджлог\\p{L}*/": "#677 mode label (F03): Russian twin of OUTWARD_ARTIFACT_RU body; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /дела|далеко|хорошо/": "#677 mode label (F03): Russian twin of STATE_QUESTION_RU body; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /какой|какая|какие/": "#677 mode label (F03): Russian twin of STATE_QUESTION_RU body; recall is not gated on it",
-  "packages/daemon/src/prompt-classify.ts :: words /замер\\p{L}*|измер\\p{L}*|бенчмарк\\p{L}*/": "#677 mode label (F03): Russian twin of PROJECT_STATE_NOUN_RU body; recall is not gated on it",
 
   // ── #676: impact intent stays with the Experimental milestone ──
   "packages/daemon/src/code-graph/impact-intent.ts :: name IMPACT_DE": "#676 experimental impact intent, decided there",

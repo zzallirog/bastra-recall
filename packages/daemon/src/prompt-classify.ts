@@ -4,6 +4,7 @@
  * per-mode score floor and prompt extraction from the hook payload. Pure and
  * deterministic; runs before any recall work.
  */
+import { isSignificantLength } from "@bastra-recall/core";
 
 export const SCORE_FLOOR = 50; // higher than PreToolUse: prompts rarely match recall_when exactly
 export const MUST_LOAD_SCORE = 100;
@@ -20,16 +21,32 @@ export interface ClaudeHookPayload {
 
 export type DetectedMode = "retrieval" | "assertion" | "none" | "generic";
 
-// DE + EN retrieval triggers — match the spec in Issue #33. RU (F03): the same
-// request in Russian must land in the same mode, or it gets a different floor.
-const RETRIEVAL_DE = /^\s*(such|finde|wo (ist|sind)|wann (war|hatte)|wieviel|wie viel|was hab(e ich)?|was war)/i;
-const RETRIEVAL_EN = /^\s*(find|search|where (is|are)|when (was|did)|how much|what (did|was))/i;
-const RETRIEVAL_RU = /^\s*(найд[иё]\p{L}*|найти|ищи|поищи|где (лежит|лежат|находится|находятся|был[аио]?|были)|когда (был[аио]?|были|мы)|сколько|что (я|мы) (делал|делали|писал|писали)|что было)(?![\p{L}\p{N}])/iu;
+// Retrieval mode (#33) used to be a DE/EN/RU word list at the start of the
+// prompt ("find", "wo ist", "где лежит"): a Polish, Japanese or Arabic user
+// asking the same thing never got it, so their lookups ran on the generic
+// floor. The mode now follows the SHAPE of the prompt, which every script
+// writes the same way: a question. A clause ending in a question mark of any
+// script — ? ？ ؟ ; (Greek) ፧ ՞ ‽, or opened by the Spanish ¿ — is an
+// explicit ask; an imperative lookup ("find the lease") without one is
+// score-gated like any prompt (#677), in every language alike.
+/** A question mark that ends a clause: after a letter, digit or closing
+ *  quote/bracket, and followed by whitespace, "!", another question mark, a
+ *  closing quote/bracket or the end — not the `?` of `a?.b` or a URL query.
+ *  French typography puts a space before it ("c'est quoi ?"); then only the
+ *  end of the clause may follow, so `x ?? y` stays code. */
+const QUESTION_END_RE =
+  /[\p{L}\p{M}\p{N}"'»”’)\]}」』](?:[?？؟\u037e፧‽⁇⁈⁉](?=[\s?？!！"'»”’)」』*_`]|$)|[\u0020\u00a0\u202f][?？؟\u037e፧‽⁇⁈⁉](?=[!！]*(?:\s|$)))/u;
+/** Greek writes its question mark as the semicolon key: a ";" after a Greek
+ *  word at the end of a line. Anywhere else ";" is a semicolon. */
+const GREEK_QUESTION_RE = /\p{Script=Greek}\p{M}*;[ \t]*(?:\n|$)/u;
+/** A question opened explicitly: Spanish ¿, and the Armenian question mark,
+ *  which sits inside the word it questions. */
+const QUESTION_OPEN_RE = /[¿՞]/u;
 
 export function detectRetrieval(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return false;
-  return RETRIEVAL_DE.test(trimmed) || RETRIEVAL_EN.test(trimmed) || RETRIEVAL_RU.test(trimmed);
+  return QUESTION_END_RE.test(trimmed) || GREEK_QUESTION_RE.test(trimmed) || QUESTION_OPEN_RE.test(trimmed);
 }
 
 // ─── assertion lane (#252) ───────────────────────────────────────────────────
@@ -38,57 +55,26 @@ export function detectRetrieval(prompt: string): boolean {
 // Writing a sentence touches nothing: a draft reply, a changelog entry, an
 // issue comment or an answer about project state makes factual claims and
 // fires no hook — the claim comes out of model memory while the vault holds
-// the measured answer. A finished sentence is not lexically distinguishable
-// from an opinion, so the request is classified instead of the output: "draft
-// a reply", "write the release notes", "what's the state of X" are all
-// recognisable in the PROMPT, before the text exists.
+// the measured answer.
 //
-// Deliberately narrow — two signals are required, never a bare verb, because
-// a lane that fires on every declarative prompt is the noise that made the
-// passive channel fail. Misses claims that only arise mid-draft; that is the
-// known gap, tracked in #252 as the case for an outbound verification pass.
+// The request used to be classified by DE/EN/RU composing verbs and artefact
+// nouns ("draft … release notes", "напиши … в ишью"); other languages never
+// reached the mode. What stays is the language-neutral part of that signal:
+// the prompt names an issue or pull request by number (`#123`) — outward by
+// construction. A question about project state is a question (retrieval
+// above); a composing request in any language is score-gated like the rest.
 
-/** Composing an artefact for someone else. */
-const COMPOSE_VERB =
-  /\b(draft|write|compose|announce|reply|respond|publish|schreib\w*|verfass\w*|formulier\w*|entwirf|entwerfe|antworte\w*|beantworte|ver(ö|oe)ffentlich\w*)\b/i;
-
-/** RU composing verbs (F03). `\b` is ASCII-only, so Cyrillic uses letter lookarounds. */
-const COMPOSE_VERB_RU =
-  /(?<![\p{L}\p{N}])(напиши\p{L}*|составь\p{L}*|сформулируй\p{L}*|набросай\p{L}*|подготовь\p{L}*|ответь\p{L}*|ответить|опубликуй\p{L}*|анонсируй\p{L}*)(?![\p{L}\p{N}])/iu;
-
-/** …that leaves this machine. `#123` counts: naming an issue is outward. */
-const OUTWARD_ARTIFACT =
-  /(\B#\d+\b|\b(release[- ]?notes?|release-?notizen|changelog|(ä|ae)nderungsprotokoll|announcement|ank(ü|ue)ndigung|blog\w*|newsletter|readme|docs?|documentation|dokumentation|issue|pr|pull[- ]?requests?|comment|kommentar|reply|antwort|thread|discord|mail|e-?mail|posting|tweet|beitrag)\b)/i;
-
-const OUTWARD_ARTIFACT_RU =
-  /(?<![\p{L}\p{N}])(релиз-?нот\p{L}*|заметк\p{L}* к релизу|чейнджлог\p{L}*|список изменений|анонс\p{L}*|блог\p{L}*|рассылк\p{L}*|ридми|документаци\p{L}*|ишью|комментари\p{L}*|ответ\p{L}*|тред\p{L}*|дискорд\p{L}*|письм\p{L}*|почт\p{L}*|пост\p{L}*|твит\p{L}*)(?![\p{L}\p{N}])/iu;
-
-/** Asking for a state… */
-const STATE_QUESTION =
-  /\b(what'?s|what is|how (far|many|much|good)|status|state|wie (ist|weit|viele?|gut)|stand|wo stehen wir)\b/i;
-
-const STATE_QUESTION_RU =
-  /(?<![\p{L}\p{N}])(какой|какая|какие|каков\p{L}*|статус\p{L}*|состояни\p{L}*|как (дела|далеко|хорошо)|сколько|насколько|где мы)(?![\p{L}\p{N}])/iu;
-
-/** …that this project has actually measured or recorded. */
-const PROJECT_STATE_NOUN =
-  /\b(measured?|measurement|benchmark|eval|recall@\w*|numbers?|metrics?|coverage|latency|ceiling|zahlen|gemessen|messung|kennzahl\w*|milestone|roadmap|release|version|tests?)\b/i;
-
-const PROJECT_STATE_NOUN_RU =
-  /(?<![\p{L}\p{N}])(замер\p{L}*|измер\p{L}*|бенчмарк\p{L}*|метрик\p{L}*|цифр\p{L}*|покрыти\p{L}*|задержк\p{L}*|потолок|роадмап\p{L}*|веха|вех\p{L}*|верси\p{L}*|тест\p{L}*)(?![\p{L}\p{N}])/iu;
+/** An issue/PR reference: `#123`, not a hex colour, heading or anchor. */
+const ISSUE_REF_RE = /(?<![\p{L}\p{N}_&#/])#\d{1,6}(?![\p{L}\p{N}_])/u;
 
 /**
- * #252: does the prompt ask for an ASSERTION — outbound text, or a claim about
- * this project's measured state? Both end in sentences someone else reads, and
- * neither edits a file, so no other lane fires for them.
+ * #252: does the prompt ask for an ASSERTION — text that leaves this machine?
+ * Structural only: it names an issue or pull request.
  */
 export function detectAssertion(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return false;
-  if ((COMPOSE_VERB.test(trimmed) || COMPOSE_VERB_RU.test(trimmed)) &&
-      (OUTWARD_ARTIFACT.test(trimmed) || OUTWARD_ARTIFACT_RU.test(trimmed))) return true;
-  return (STATE_QUESTION.test(trimmed) || STATE_QUESTION_RU.test(trimmed)) &&
-    (PROJECT_STATE_NOUN.test(trimmed) || PROJECT_STATE_NOUN_RU.test(trimmed));
+  return ISSUE_REF_RE.test(trimmed);
 }
 
 // #151: trivial-prompt gate. Bare acks, one-worders and slash-command
@@ -96,25 +82,13 @@ export function detectAssertion(prompt: string): boolean {
 // context tax (and in the default mode "all" the hook otherwise fires on
 // EVERY prompt). Deterministic, runs before any recall work.
 //
-// #707: the ack words are data per language (ISO-639-1), like the cue lists
-// in lexicon.ts. Two structural rules need no list and hold in every script:
-// a prompt of at most two characters ("да", "ok"), and one without any letter
-// or digit ("👍", "!!", "…"). The NEUTRAL path for an ack in a language
-// without a list ("tamam", "спасибо") is one ordinary recall, gated by score
-// like any prompt — a missed ack costs one lookup, never a lost recall.
-const TRIVIAL_ACKS_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  en: [
-    "ok", "okay", "k", "kk", "yes", "yep", "yeah", "no", "nope", "thx",
-    "thanks", "thank you", "cool", "nice", "great", "perfect", "go",
-    "continue", "proceed", "stop", "wait", "done", "sure",
-  ],
-  de: [
-    "ja", "jo", "jep", "nein", "ne", "nö", "danke", "super", "top", "passt",
-    "perfekt", "weiter", "mach", "mach weiter", "los", "gut", "genau",
-    "richtig", "stimmt", "erledigt", "fertig",
-  ],
-};
-const TRIVIAL_ACKS = new Set(Object.values(TRIVIAL_ACKS_BY_LANGUAGE).flat());
+// No ack list (#707 had en/de): the gate is structural and holds in every
+// script — at most two letters ("ok", "да", "ja"), a run of Hiragana only
+// ("はい", "うん" — grammar, lexical.ts), or no letter or digit at all ("👍",
+// "!!", "…"). Every other ack ("thanks", "спасибо", "tamam", "好的") runs one
+// ordinary recall, gated by score like any prompt — a missed ack costs one
+// lookup, never a lost recall.
+const HIRAGANA_ONLY_RE = /^\p{Script=Hiragana}+$/u;
 
 // A typed slash command: "/name" or "/name args". The first token must not
 // contain a second "/" so absolute paths ("/Users/… bitte lesen") never gate.
@@ -129,13 +103,14 @@ export function isTrivialPrompt(prompt: string): boolean {
   // body instead of user intent.
   if (SLASH_COMMAND_RE.test(trimmed) && !trimmed.includes("\n")) return true;
   if (trimmed.includes("<command-name>") || trimmed.startsWith("<local-command-")) return true;
-  // Bare ack / one-worder (trailing punctuation tolerated).
-  const bare = trimmed.toLowerCase().replace(/[\s!.?…]+$/u, "");
-  if (TRIVIAL_ACKS.has(bare)) return true;
-  if (bare.length <= 2) return true;
-  // #707: nothing to recall on in any language — emoji, punctuation, symbols.
+  // Trailing punctuation of any script tolerated ("OK!", "да.", "はい。").
+  const bare = trimmed.replace(/[\s\p{P}]+$/u, "");
+  // Nothing to recall on in any language — emoji, punctuation, symbols.
   if (!/[\p{L}\p{N}]/u.test(bare)) return true;
-  return false;
+  if (HIRAGANA_ONLY_RE.test(bare)) return true;
+  // Two letters, counted as letters (a two-character Chinese or Korean word
+  // is content: `isSignificantLength` counts it like a Latin word of four).
+  return !/\s/.test(bare) && !isSignificantLength(bare, 3);
 }
 
 /**
