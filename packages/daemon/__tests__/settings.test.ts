@@ -255,17 +255,24 @@ test("sharedRecall: language is lowercased and invalid values are dropped", asyn
   });
 });
 
-test("sharedRecall: a regex-valid but UNSUPPORTED hand-edited language (fr) is dropped on read", async () => {
+test("sharedRecall: a regex-valid but UNKNOWN hand-edited language code (qq) is dropped on read; any real one is kept", async () => {
   await withTempFile(async (path) => {
-    // "fr" passes the loose docs-language regex but is not a supported pool language.
-    // The file-read validator must agree with the boot gate and drop it.
+    // "qq" passes the loose docs-language regex but names no language CLDR
+    // knows. The file-read validator must agree with the boot gate and drop it.
+    await writeFile(
+      path,
+      JSON.stringify({ update: { mode: "notify" }, sharedRecall: { enabled: true, language: "qq" } }),
+      "utf8",
+    );
+    assert.equal(await getSharedRecallEnabled(path), true);
+    assert.equal(await getSharedRecallLanguage(path), undefined, "unknown language must not persist into the daemon");
+    // Any language is a valid override now, not only de/en.
     await writeFile(
       path,
       JSON.stringify({ update: { mode: "notify" }, sharedRecall: { enabled: true, language: "fr" } }),
       "utf8",
     );
-    assert.equal(await getSharedRecallEnabled(path), true);
-    assert.equal(await getSharedRecallLanguage(path), undefined, "unsupported language must not persist into the daemon");
+    assert.equal(await getSharedRecallLanguage(path), "fr");
   });
 });
 

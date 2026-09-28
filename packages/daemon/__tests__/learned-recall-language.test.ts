@@ -1,108 +1,62 @@
 /**
- * Tests for src/learned-recall/language.ts — heuristic DE/EN detection with abstain.
+ * Tests for src/learned-recall/language.ts — language facts from CLDR data and
+ * scripts, no function-word lists (lang-parity; the de/en detector is gone).
  *
  * Run: npx tsx --test packages/daemon/__tests__/learned-recall-language.test.ts
  */
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
+import { foldTerm, sameWordForm } from "@bastra-recall/core";
 
 import {
   bridgeLanguage,
-  detectLanguage,
   isBridgeLanguage,
   isSupportedLanguage,
-  SUPPORTED_LANGUAGES,
+  namedLanguage,
+  scriptShare,
+  scriptsOf,
   UNDETERMINED_LANGUAGE,
 } from "../src/learned-recall/language.js";
 
-test("detects clear German from function words", () => {
-  const r = detectLanguage("wie kann ich das Feld in der Datenbank speichern");
-  assert.equal(r.lang, "de");
-  assert.ok(r.confidence > 0, "should be confident");
+test("isSupportedLanguage accepts every language CLDR names, not a list of two", () => {
+  for (const ok of ["de", "en", "fr", "ru", "uk", "sw", "vi", "he", "yue"]) assert.equal(isSupportedLanguage(ok), true, ok);
+  for (const bad of ["xx", "qq", "DE", "de-DE", "und-x", "", 42, null]) assert.equal(isSupportedLanguage(bad), false, String(bad));
 });
 
-test("detects clear English from function words", () => {
-  const r = detectLanguage("how do I store the field in the database");
-  assert.equal(r.lang, "en");
-  assert.ok(r.confidence > 0);
+test("scriptsOf reads the writing system from CLDR likely subtags", () => {
+  assert.deepEqual(scriptsOf("ru"), ["Cyrl"]);
+  assert.deepEqual(scriptsOf("ja"), ["Hani", "Hira", "Kana"]);
+  assert.deepEqual(scriptsOf("ko"), ["Hang", "Hani"]);
+  assert.deepEqual(scriptsOf("hi"), ["Deva"]);
+  assert.deepEqual(scriptsOf("sw"), ["Latn"]);
 });
 
-test("a single diacritic commits to German even with weak stopword margin", () => {
-  // "für" is a DE stopword AND carries a diacritic — unambiguously German.
-  const r = detectLanguage("config für test");
-  assert.equal(r.lang, "de");
+test("scriptShare counts words in the language's script — any language, same rule", () => {
+  assert.equal(scriptShare("обнови деплой", "ru"), 1);
+  assert.equal(scriptShare("update the deploy", "ru"), 0);
+  assert.ok((scriptShare("рефакторинг checkout payment retry", "ru") ?? 0) > 0.2, "tech anchors do not drown a Russian trigger");
+  assert.equal(scriptShare("デプロイ script", "ja"), 0.5);
+  assert.equal(scriptShare("12345 !!!", "ru"), null, "no words, no verdict");
 });
 
-test("diacritics outweigh an English stopword tie", () => {
-  // "the" (en) vs "ä/ö" diacritics (de*2 each) — German wins on diacritic weight.
-  const r = detectLanguage("the Häuser Höfe");
-  assert.equal(r.lang, "de");
-});
-
-test("a single German proper noun does NOT misroute an English-stopword query to German", () => {
-  // "Müller" carries a diacritic, but the sentence is English (the). A single
-  // diacritic token in an EN-dominated query must not flip the result to DE.
-  const r = detectLanguage("the Müller approach");
-  assert.notEqual(r.lang, "de", "one German name must not flip an English query to German");
-  assert.equal(r.lang, "en");
-});
-
-test("a lone German term inside an English-stopword query stays English (no sub-threshold DE flip)", () => {
-  const r = detectLanguage("what is the diff für this");
-  assert.notEqual(r.lang, "de");
-});
-
-test("multiple distinct diacritic tokens still commit to German", () => {
-  // genuinely German: two distinct umlaut-bearing content words, not one name.
-  assert.equal(detectLanguage("the Häuser Höfe").lang, "de");
-});
-
-test("abstains on a code-shaped query with no function words", () => {
-  const r = detectLanguage("NSPanel resignKey Observer attachedSheet");
-  assert.equal(r.lang, null, "no language signal → abstain");
-  assert.equal(r.confidence, 0);
-});
-
-test("abstains on too-short input", () => {
-  assert.equal(detectLanguage("x").lang, null);
-  assert.equal(detectLanguage("").lang, null);
-  assert.equal(detectLanguage("   ").lang, null);
-});
-
-test("abstains when DE and EN signals are evenly mixed without diacritics", () => {
-  // one DE stopword ("und"), one EN stopword ("the"), no diacritics → ambiguous.
-  const r = detectLanguage("und the");
-  assert.equal(r.lang, null, "even split, no diacritic → abstain");
-});
-
-test("scores are reported for debugging", () => {
-  const r = detectLanguage("die Datenbank");
-  assert.ok(r.scores.de >= 1);
-  assert.equal(typeof r.scores.en, "number");
-});
-
-test("isSupportedLanguage guards the enum", () => {
-  assert.equal(isSupportedLanguage("de"), true);
-  assert.equal(isSupportedLanguage("en"), true);
-  assert.equal(isSupportedLanguage("fr"), false);
-  assert.equal(isSupportedLanguage(42), false);
-  assert.equal(isSupportedLanguage(null), false);
-});
-
-test("SUPPORTED_LANGUAGES is the source of truth", () => {
-  assert.deepEqual([...SUPPORTED_LANGUAGES], ["de", "en"]);
-});
-
-test("#707: bridgeLanguage never returns null — Russian, Turkish, Greek file under und", () => {
+test("#707: a bridge files under und unless a language is configured — the folder is never guessed", () => {
   assert.equal(UNDETERMINED_LANGUAGE, "und");
-  assert.equal(bridgeLanguage("wie kann ich das Feld in der Datenbank speichern"), "de");
-  assert.equal(bridgeLanguage("почему сервер падает ночью"), "und");
-  assert.equal(bridgeLanguage("veritabanı şifresi nerede duruyor"), "und");
-  assert.equal(bridgeLanguage("γιατί πέφτει ο διακομιστής"), "und");
-  assert.equal(bridgeLanguage("NSPanel resignKey"), "und");
+  for (const q of ["wie kann ich das Feld in der Datenbank speichern", "почему сервер падает ночью", "NSPanel resignKey"]) {
+    assert.equal(bridgeLanguage(q), "und", q);
+  }
 });
 
 test("#707: isBridgeLanguage checks the folder shape, not a language list", () => {
   for (const ok of ["de", "en", "und", "ru", "tr", "el"]) assert.equal(isBridgeLanguage(ok), true, ok);
   for (const bad of ["archive", "../x", "", "DE", "de-DE", 42, null]) assert.equal(isBridgeLanguage(bad), false, String(bad));
+});
+
+test("namedLanguage finds the language a text names, in that language's own name", () => {
+  const named = (t: string) => namedLanguage(t, sameWordForm, foldTerm);
+  assert.equal(named("Deutsch, Du-Form"), "de");
+  assert.equal(named("на русском, кратко"), "ru");
+  assert.equal(named("日本語で"), "ja");
+  assert.equal(named("بالعربية"), "ar");
+  assert.equal(named("Daniel, terse"), null, "a first name is not Danish");
+  assert.equal(named("TypeScript Node Postgres"), null);
 });

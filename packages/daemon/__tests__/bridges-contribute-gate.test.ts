@@ -155,7 +155,10 @@ test("contribute stages exactly the bridges that pass, scrubbed and signed", asy
 
 test("a demoted bridge stays home even with a positive held-out lift", async () => {
   await withSetup(async ({ bridgesRoot }) => {
-    const dir = join(bridgesRoot, "bridges", "de");
+    // Filed under the query's language folder (a Latin-script query without a
+    // word list is `und`); take whichever one the mint wrote.
+    const [lang] = await readdir(join(bridgesRoot, "bridges"));
+    const dir = join(bridgesRoot, "bridges", lang);
     const [first] = await readdir(dir);
     const path = join(dir, first);
     const b = JSON.parse(await readFile(path, "utf8"));

@@ -20,7 +20,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SaveMemoryInput } from "@bastra-recall/core";
 import { sendJsonPlain } from "./webui.js";
 import { getUiEnabled, setSizeGuide, setPrimaryLanguage } from "./settings.js";
-import { detectLanguage } from "./learned-recall/language.js";
+import { namedLanguage } from "./learned-recall/language.js";
+import { foldTerm, sameWordForm } from "@bastra-recall/core";
 import { saveMemoryWithAuditTrail } from "./audit-trail.js";
 
 export const ONBOARD_MARKER = ".onboarding-done";
@@ -395,57 +396,22 @@ export async function persistConventionSettings(
   }
 }
 
-/**
- * Sprachnamen → ISO-639-1. Lateinische Namen (inkl. Eigen- und deutscher
- * Bezeichnung) matchen an Unicode-Wortgrenzen, damit z.B. "german" nicht in
- * einem größeren Token feuert; script-spezifische Namen (Kyrillisch/CJK/Hangul)
- * matchen als bloßer Substring — sie tauchen nicht zufällig in anderem Text auf.
- */
-const LANGUAGE_NAME_HINTS: ReadonlyArray<{ code: string; latin: string[]; script?: string[] }> = [
-  { code: "de", latin: ["deutsch", "german"] },
-  { code: "en", latin: ["englisch", "english"] },
-  { code: "ru", latin: ["russisch", "russian"], script: ["русский"] },
-  { code: "fr", latin: ["französisch", "franzoesisch", "french", "français", "francais"] },
-  { code: "es", latin: ["spanisch", "spanish", "español", "espanol"] },
-  { code: "it", latin: ["italienisch", "italian", "italiano"] },
-  { code: "pt", latin: ["portugiesisch", "portuguese", "português", "portugues"] },
-  { code: "pl", latin: ["polnisch", "polish", "polski"] },
-  { code: "nl", latin: ["niederländisch", "niederlaendisch", "dutch", "nederlands"] },
-  { code: "ja", latin: ["japanisch", "japanese"], script: ["日本語"] },
-  { code: "zh", latin: ["chinesisch", "chinese"], script: ["中文"] },
-  { code: "ko", latin: ["koreanisch", "korean"], script: ["한국어"] },
-];
-
-/** First explicitly named language in `text` → its ISO code (earliest mention wins), or null. */
+/** First language `text` names → its code (earliest mention wins), or null.
+ *  CLDR display names — each language's own name and its English one — for
+ *  every language ICU knows; no list of twelve (lang-parity). Word-form
+ *  tolerant: "на русском" names русский, "auf Deutsch" names Deutsch. */
 function explicitLanguage(text: string): string | null {
-  const hay = text.toLowerCase();
-  let bestCode: string | null = null;
-  let bestPos = Infinity;
-  for (const hint of LANGUAGE_NAME_HINTS) {
-    let pos = -1;
-    for (const name of hint.latin) {
-      const m = new RegExp(`(?<![\\p{L}])${name}(?![\\p{L}])`, "u").exec(hay);
-      if (m && (pos < 0 || m.index < pos)) pos = m.index;
-    }
-    for (const name of hint.script ?? []) {
-      const i = hay.indexOf(name.toLowerCase());
-      if (i >= 0 && (pos < 0 || i < pos)) pos = i;
-    }
-    if (pos >= 0 && pos < bestPos) {
-      bestPos = pos;
-      bestCode = hint.code;
-    }
-  }
-  return bestCode;
+  return namedLanguage(text, sameWordForm, foldTerm);
 }
 
 /**
  * User-Sprache aus den Onboarding-Antworten in die cli-settings spiegeln (#231,
  * Language-first recall): Der Session-Hook weist den Agenten dann an, Memories in
- * dieser Sprache zu verfassen. Primär zählt eine explizit in der identity-Antwort
- * genannte Sprache ("Deutsch, Du-Form" → de); fällt das aus, greift die
- * heuristische Detection über den zusammengefügten Text ALLER Antworten (liefert
- * nur de/en). Kein eindeutiges Signal → nichts schreiben. Best-effort — ein
+ * dieser Sprache zu verfassen. Es zählt eine in der identity-Antwort genannte
+ * Sprache ("Deutsch, Du-Form" → de, "по-русски, на ты" → ru), in jeder Sprache
+ * der Welt benannt. Geraten wird nicht mehr: die frühere Heuristik über die
+ * Funktionswörter aller Antworten kannte nur de/en und machte Finnisch zu
+ * Deutsch. Kein genanntes Signal → nichts schreiben. Best-effort — ein
  * Settings-Fehler bricht nie ein Onboarding ab.
  */
 export async function persistLanguageSetting(
@@ -453,11 +419,7 @@ export async function persistLanguageSetting(
   settingsPath?: string,
 ): Promise<void> {
   const identity = (answers.identity ?? "").trim();
-  let code = identity ? explicitLanguage(identity) : null;
-  if (!code) {
-    const all = Object.values(answers).join(" \n ").trim();
-    if (all) code = detectLanguage(all).lang;
-  }
+  const code = identity ? explicitLanguage(identity) : null;
   if (!code) return;
   try {
     await setPrimaryLanguage(code, settingsPath);

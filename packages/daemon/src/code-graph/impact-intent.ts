@@ -5,58 +5,29 @@
  * about to be written. A prompt has none, and "inject the graph on every
  * prompt" is the failure the counter-review named first — context cost on
  * every turn for an answer almost no turn asked for. So the block is delivered
- * only when the prompt IS the question the graph answers.
+ * only when the prompt asks a question about something the graph knows.
  *
- * TWO CONDITIONS, BOTH REQUIRED. A phrase that asks about change impact, AND a
- * concrete target — a file, a symbol — named in the prompt. Either alone is
- * not enough: "was bricht das?" without a name has nothing to look up, and
- * "packages/core/src/save.ts" in a prompt about formatting is not a question
- * about blast radius.
+ * TWO CONDITIONS, BOTH REQUIRED. The prompt is a QUESTION — in any script
+ * (core `isQuestion`: ? ？ ؟ …) — AND it names a concrete target, a file or a
+ * code-shaped symbol. Either alone is not enough: "was bricht das?" without a
+ * name has nothing to look up, and "packages/core/src/save.ts" in a request
+ * to reformat it is not a question at all.
  *
  * THE SECOND GATE IS THE GRAPH, NOT THIS FILE. Nothing here decides whether a
  * candidate is real; the caller resolves every candidate against the graph and
  * injects nothing when none resolves. That is what keeps the extraction below
- * able to be generous without the gate being loose: an ordinary German or
- * English word that happens to look like an identifier is simply not in
- * `idsByLabel`, and a path that is not indexed is not in `symbolsByFile`.
+ * able to be generous without the gate being loose: an ordinary word that
+ * happens to look like an identifier is simply not in `idsByLabel`, and a path
+ * that is not indexed is not in `symbolsByFile`.
  *
- * WORDING, NOT PARSING. These are the phrasings the issue names, in the two
- * languages this vault is used in. They are deliberately narrow — a question
- * about dependencies in the other direction ("wovon hängt X ab?") is a
- * different question and is not in here — and they are pinned by a list of 30+
- * negative prompts in the tests, which is the only thing that keeps a widening
- * from going unnoticed.
+ * NO PHRASE LIST. This gate used to be German and English phrasings ("was
+ * bricht", "who calls", "blast radius"); the same question in any other
+ * language never got the graph's answer. The price of reading the shape
+ * instead of the words: a question that names a symbol for another reason
+ * ("what does `validateMemory` return?") also gets the callers — on a lane the
+ * user opted into (#607), and only for a symbol the graph resolves.
  */
-
-/** Phrases that ask what a change breaks — German. */
-const IMPACT_DE: readonly RegExp[] = [
-  // "was bricht", "was geht (dann) kaputt", "was macht das kaputt"
-  /\bwas\s+(?:\w+\s+){0,3}?(?:kaputt|bricht)\b/i,
-  /\bbricht\b[^.?!]{0,60}\bwenn ich\b/i,
-  // "welche Dateien muss ich anpassen", "welche Stellen muss ich nachziehen"
-  /\bwelche\s+(?:dateien|files|stellen|module|aufrufe)\b[^.?!]{0,80}\b(?:anpass|ändern|andern|nachzieh|mitzieh|aktualisier|anfassen|umbau)/i,
-  // the call-site question, in all the shapes it gets asked in
-  /\baufrufstelle/i,
-  /\baufrufer\b/i,
-  /\bwer\s+(?:ruft|benutzt|nutzt|verwendet)\b/i,
-  /\bwas\s+h(?:ä|ae)ngt\s+(?:alles\s+)?(?:an|dran|davon)\b/i,
-  /\bkompiliert\b[^.?!]{0,40}\bnicht\s+mehr\b/i,
-  /\bauswirkung(?:en)?\b[^.?!]{0,60}\b(?:änder|ander|umbenenn|entfern|lösch|losch)/i,
-];
-
-/** Phrases that ask what a change breaks — English. */
-const IMPACT_EN: readonly RegExp[] = [
-  /\bwhat\s+(?:else\s+)?(?:will|would|could|might|does)?\s*breaks?\b/i,
-  /\bbreaks?\b[^.?!]{0,60}\bif I (?:change|rename|remove|delete|move)\b/i,
-  /\bwhich\s+files\b[^.?!]{0,80}\b(?:change|update|adapt|touch|adjust|fix|migrate)/i,
-  /\bcall[- ]?sites?\b/i,
-  /\bwho\s+(?:calls|uses|depends on)\b/i,
-  /\bwhat\s+(?:calls|uses|depends on)\b/i,
-  /\bblast\s+radius\b/i,
-  /\bimpact\s+of\s+(?:chang|renam|remov|delet|mov)/i,
-  /\b(?:stop|no longer|won't|will not)\s+compil/i,
-  /\bmiss(?:ed|ing)?\s+(?:a|any|some)\s+(?:call|caller|usage)/i,
-];
+import { isQuestion } from "@bastra-recall/core";
 
 /** Source extensions a path candidate must carry to be one. */
 const SOURCE_EXT =
@@ -70,9 +41,9 @@ const BACKTICKED_RE = /`([^`\n]{2,80})`/g;
 /**
  * A bare identifier worth looking up: long enough not to be an article, and
  * shaped like code rather than like prose — an internal capital (camelCase,
- * PascalCase past the first letter) or an underscore. A lowercase German or
- * English word cannot match, which is what keeps the resolver from being
- * handed the whole sentence.
+ * PascalCase past the first letter) or an underscore. A lowercase word of any
+ * language cannot match, which is what keeps the resolver from being handed
+ * the whole sentence.
  */
 const IDENTIFIER_RE = /\b([A-Za-z_$][A-Za-z0-9_$]{3,})\b/g;
 
@@ -82,7 +53,7 @@ function looksLikeCode(token: string): boolean {
 }
 
 export interface ImpactIntent {
-  /** A change-impact phrase matched. */
+  /** The prompt is a question (any script). */
   asked: boolean;
   /** Repo-relative or bare file paths the prompt names, in order of appearance. */
   paths: string[];
@@ -102,7 +73,7 @@ const MAX_PROMPT_CHARS = 4000;
  */
 export function changeImpactIntent(prompt: string): ImpactIntent {
   const text = prompt.length > MAX_PROMPT_CHARS ? prompt.slice(0, MAX_PROMPT_CHARS) : prompt;
-  const asked = [...IMPACT_DE, ...IMPACT_EN].some((re) => re.test(text));
+  const asked = isQuestion(text);
   if (!asked) return { asked: false, paths: [], symbols: [] };
 
   const paths = take(matches(text, PATH_RE), 4);

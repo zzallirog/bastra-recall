@@ -12,8 +12,8 @@
  * vorkommen — mindestens 2 Tokens, oder genau 1 Identifier-Token exakt;
  * eine mehrwortige Phrase, von der nur ein Inhaltstoken übrig bleibt
  * („antwortentwurf bitte"), matcht wörtlich als Tokenfolge (20.08.);
- * „oder"/„or" (Sprachdaten, #707) oder ein freistehendes „/" teilt eine
- * Phrase in Alternativen. Bewusst NICHT
+ * ein freistehendes „/" oder „|" (jede Schrift, #707) und „oder"/„or"
+ * teilen eine Phrase in Alternativen. Bewusst NICHT
  * matchedRecallWhen (MiniSearch: fuzzy/prefix). recall_when_expanded zählt
  * seit dem 19.08.-Vorfall MIT: deterministisch aus den autorisierten Phrasen
  * generiert, erweitert es die Formulierung, nicht die Autorisierung — ohne
@@ -31,7 +31,6 @@ import {
   tokenizeWithIdentifiers,
   foldTerm,
   MIN_SIGNIFICANT_TOKEN_LEN,
-  ALTERNATIVE_WORDS,
   hasWordForm,
   isShortWord,
   isSignificantLength,
@@ -49,12 +48,14 @@ import { isCommonTerm } from "./common-terms.js";
 const MIN_TOKEN_LEN = MIN_SIGNIFICANT_TOKEN_LEN;
 const DEFAULT_MAX_PER_TURN = 2;
 
-/** #707: „oder"/„or"/„или" … aus den Sprachdaten, plus die strukturellen
- *  Trenner „/" und „|" (nur freistehend — `src/app` bleibt ein Token). */
-const ALTERNATIVE_SPLIT_RE = new RegExp(
-  `\\s+(?:${[...ALTERNATIVE_WORDS].map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\s+|\\s+[/|]\\s+`,
-  "iu",
-);
+/** Trenner für Alternativen in einer Phrase. Strukturell (#707): ein
+ *  freistehendes „/" oder „|" in jeder Schrift (`src/app` bleibt ein Token).
+ *  „oder"/„or" ist der bekannte Rest aus der Zeit vor #707 (lang-parity
+ *  INVENTORY): eine andere Sprache schreibt ihr „или"/„ou" nicht als Teiler,
+ *  die Phrase wird dort strenger (beide Substantive nötig), feuert nie falsch;
+ *  Alternativen gehen in jeder Sprache als eigene recall_when-Einträge oder
+ *  mit „/". Keine Wortliste pro Sprache. */
+const ALTERNATIVE_SPLIT_RE = /\s+(?:oder|or)\s+|\s+[/|]\s+/iu;
 
 export interface ReflexHit {
   id: string;
@@ -110,9 +111,8 @@ function evaluatePhrase(
   // Substantive im Prompt und feuerte nie (19.08.-Vorfall: die
   // Nachrichtenkonvention — reflex, salience 0.9 — blieb beim Entwerfen
   // einer Nachricht stumm). Jede Alternative matcht für sich nach den
-  // normalen Regeln. #707: die Wörter sind Daten pro Sprache
-  // (ALTERNATIVE_WORDS, core/stopwords.ts), ein freistehendes „/" oder „|"
-  // teilt in jeder Schrift.
+  // normalen Regeln. Ein freistehendes „/" oder „|" teilt in jeder Schrift
+  // (ALTERNATIVE_SPLIT_RE).
   const alternatives = phrase.split(ALTERNATIVE_SPLIT_RE);
   if (alternatives.length > 1) {
     const evals = alternatives.map((alt) => evaluatePhrase(alt, contextTokens, contextSequence));

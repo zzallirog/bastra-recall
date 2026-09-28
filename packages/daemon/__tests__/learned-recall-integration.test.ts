@@ -197,8 +197,10 @@ test("default shadow: a firing bridge does not change the ranking, the bridge_ex
         }
       }
       assert.ok(row, "the fire is logged");
+      // A Latin-script query without a word list is filed as `und` (CLDR, no
+      // de/en function-word lists); the bridge fires in any language.
       assert.deepEqual(row!.bridge_expansion, {
-        lang: "de",
+        lang: "und",
         added: ["resignkey", "observer", "attachedsheet", "dismiss"],
         applied: false,
       });

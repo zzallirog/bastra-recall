@@ -339,9 +339,9 @@ export async function readSettings(path: string = settingsFilePath()): Promise<C
     const sr: { enabled: boolean; language?: string; live?: boolean } = { enabled: data.sharedRecall.enabled };
     // Bridges owner decision 2026-09-29: live query expansion is opt-in.
     if (typeof data.sharedRecall.live === "boolean") sr.live = data.sharedRecall.live;
-    // Validate against the supported pool languages (de/en) — the SAME set the boot
-    // gate enforces — not the loose docs-language regex, so the file, CLI, and daemon
-    // agree on what a valid override is.
+    // Validate with the SAME check the boot gate enforces (any language code CLDR
+    // names — isSupportedLanguage), not the loose docs-language regex, so the file,
+    // CLI, and daemon agree on what a valid override is.
     const lng = typeof data.sharedRecall.language === "string" ? data.sharedRecall.language.trim().toLowerCase() : data.sharedRecall.language;
     if (isSupportedLanguage(lng)) sr.language = lng;
     else if (data.sharedRecall.language !== undefined) {

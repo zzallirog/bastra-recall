@@ -44,7 +44,7 @@ test("harvestBridges mints from reaches, using non-overlapping memory terms as e
   const { bridges, minted } = harvestBridges(reaches, (id) => terms[id] ?? []);
   assert.equal(minted, 1);
   const b = bridges[0];
-  assert.equal(b.lang, "de");
+  assert.equal(b.lang, "und", "filed under und: no configured language, no guess from German words");
   assert.ok(b.trigger_terms.includes("panel"));
   assert.ok(b.expansion_terms.includes("resignkey"));
   assert.ok(b.expansion_terms.includes("observer"));
@@ -108,7 +108,7 @@ test("harvestFarBridges mints when the reranker rescues a LOW-ranked candidate",
   assert.equal(r.judged, 1);
   assert.equal(r.minted, 1, "a low-ranked rescue mints a bridge");
   assert.ok(r.bridges[0].expansion_terms.includes("resignkey"));
-  assert.equal(r.bridges[0].lang, "de");
+  assert.equal(r.bridges[0].lang, "und", "filed under und: the folder is not guessed from words");
 });
 
 test("harvestFarBridges skips a confident hit (top_score >= maxScore) — not a far case", async () => {

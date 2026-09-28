@@ -19,7 +19,7 @@ import {
   formatInjectionAdvisory,
   scopeEquals,
 } from "@bastra-recall/core";
-import { detectLanguage } from "./learned-recall/language.js";
+import { scriptShare } from "./learned-recall/language.js";
 import { fixMarkerCues, imperativeLeadCues, negativeClaimCues } from "./lexicon.js";
 import {
   containedIn,
@@ -72,6 +72,10 @@ export interface SaveQualityResult {
     admitted_pool?: number;
   }>;
 }
+
+/** #231: below this share of words in the primary language's script the
+ *  triggers are written for another language's prompts. */
+const SCRIPT_MISMATCH_MAX_SHARE = 0.15;
 
 /** A word is generic when this vault uses it everywhere: in a fifth of its
  *  memories (core common-terms.ts). The English list of technology words it
@@ -234,22 +238,25 @@ export function scoreSaveQuality(
     score -= Math.min(16, restating.length * 8);
   }
 
-  // #231 (language-first recall): the hook manufactures English queries on every
-  // box, so on a non-English vault the highest-weighted field (recall_when)
-  // structurally can't match English-authored triggers. If the user's primary
-  // language is set and non-English but the joined triggers read as English,
-  // nudge toward authoring in their language. Conservative by construction:
-  // detectLanguage only fires on a confident "en" (it abstains on short /
-  // code-shaped / ambiguous input and can only tell de/en apart, so e.g. a
-  // Russian primary with Russian triggers abstains and never trips this),
-  // advisory only — never a rejection. A false negative is cheaper here.
+  // #231 (language-first recall): on a vault whose owner writes another
+  // language, triggers authored in a different SCRIPT cannot match the owner's
+  // own prompts. Measured by script, not by guessing the language from words
+  // (the old de/en function-word detector named every Finnish text German and
+  // could only ever see English): the share of the triggers' words written
+  // in a script the primary language uses (CLDR likely subtags). Under 15 %
+  // of the words → advisory. A German owner's English triggers share the Latin
+  // script and are not flagged any more; a Russian, Japanese, Arabic or Hindi
+  // owner's Latin-only triggers are, whatever their words.
   const primaryLang = deps.primaryLanguage;
-  if (primaryLang && primaryLang !== "en" && detectLanguage(input.recall_when.join(" ")).lang === "en") {
-    issues.push(`recall_when reads as English but your primary language is '${primaryLang}'`);
-    suggestions.push(
-      `author triggers in '${primaryLang}', keeping only genuine English tech terms (daemon, deploy, hook, …) as cross-lingual anchors`,
-    );
-    score -= 8;
+  if (primaryLang) {
+    const share = scriptShare(input.recall_when.join(" "), primaryLang);
+    if (share !== null && share < SCRIPT_MISMATCH_MAX_SHARE) {
+      issues.push(`recall_when is written in another script than your primary language '${primaryLang}'`);
+      suggestions.push(
+        `author triggers in '${primaryLang}', keeping only genuine technical terms (daemon, deploy, hook, …) as cross-lingual anchors`,
+      );
+      score -= 8;
+    }
   }
 
   // #149: a complete hook/context block quoted in memory content is

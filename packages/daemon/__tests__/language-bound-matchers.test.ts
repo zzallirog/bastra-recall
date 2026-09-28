@@ -24,14 +24,16 @@
  *            script (#707: Turkish `şifresi` → `ifresi`).
  *
  * Every finding must be in ALLOWLIST with a reason that carries an issue
- * reference. The list is today's known places (#676, #707) plus the detector's
- * false positives (technical vocabulary, not natural language). It can only
+ * reference. Since lang-parity the list holds ONLY the detector's false
+ * positives — technical vocabulary, tool output, product-written phrases,
+ * never words of a natural language matched against user text. It can only
  * shrink honestly: an entry whose finding is gone fails the test until it is
- * removed — so when #707 fixes a place, its line here goes too.
+ * removed.
  *
  * Adding to the allowlist is the wrong fix for a new matcher against user
- * text. Make it language-neutral (`\p{L}`, score-gated recall, embeddings), or
- * make it per-language DATA with a neutral fallback (lexicon.ts, #678).
+ * text. Make it language-neutral (`\p{L}`, script properties, the vault's own
+ * frequencies, score-gated recall, embeddings), or leave the words to the
+ * user's own lexicon file (lexicon.ts) with nothing shipped.
  *
  * Runner: node --import tsx --import ./scripts/test-env.mjs --test packages/daemon/__tests__/language-bound-matchers.test.ts
  */
@@ -46,32 +48,6 @@ const SCAN_ROOTS = ["packages/daemon/src", "packages/core/src"];
 
 /** file :: finding → why it may stay (must reference an issue). */
 const ALLOWLIST: Readonly<Record<string, string>> = {
-  // ── #707: detection only FILES a bridge (bridges/<lang>/, else "und"); mint and fire are language-neutral ──
-  "packages/daemon/src/learned-recall/language.ts :: name SUPPORTED_LANGUAGES": "#707 names the filing folder and the override values; an unknown language files under und and still mints/fires",
-  "packages/daemon/src/learned-recall/language.ts :: name DE_STOPWORDS": "#707 filing-folder detection only, never a gate",
-  "packages/daemon/src/learned-recall/language.ts :: name EN_STOPWORDS": "#707 filing-folder detection only, never a gate",
-  "packages/daemon/src/learned-recall/language.ts :: latin [^a-zäöüß]": "#707 filing-folder detection only (a non-Latin query abstains → und)",
-
-  // ── #707: per-language data with a documented neutral path — allowed shape ──
-  "packages/core/src/stopwords.ts :: keyed ALTERNATIVE_WORDS_BY_LANGUAGE": "#707 per-language data; a free-standing / or | splits alternatives in any script (tested with el)",
-
-
-
-  // ── #676: impact intent stays with the Experimental milestone ──
-  "packages/daemon/src/code-graph/impact-intent.ts :: name IMPACT_DE": "#676 experimental impact intent, decided there",
-  "packages/daemon/src/code-graph/impact-intent.ts :: name IMPACT_EN": "#676 experimental impact intent, decided there",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /dateien|files|stellen/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /anpass|ändern|andern/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /ruft|benutzt|nutzt/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /änder|ander|umbenenn/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /will|would|could/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /change|rename|remove/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /change|update|adapt/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /calls|uses|depends on/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /chang|renam|remov/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /stop|no longer|won't/": "#676 experimental impact intent",
-  "packages/daemon/src/code-graph/impact-intent.ts :: words /call|caller|usage/": "#676 experimental impact intent",
-
   // ── #679: detector false positives — not natural language, or not user text ──
   "packages/core/src/recall-banter.ts :: keyed STAGE_PHRASES": "#679 output phrases the product writes, never matched against user text",
   "packages/core/src/recall-banter.ts :: keyed SLOW_PHRASES": "#679 output phrases the product writes, never matched against user text",

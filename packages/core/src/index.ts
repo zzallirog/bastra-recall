@@ -17,7 +17,7 @@ export {
   capAtWordBoundary,
   QUERY_MAX_CHARS,
 } from "./query-normalize.js";
-export { MIN_SIGNIFICANT_TOKEN_LEN, ALTERNATIVE_WORDS } from "./stopwords.js";
+export { MIN_SIGNIFICANT_TOKEN_LEN } from "./stopwords.js";
 export {
   commonTermsIn,
   isCommonShare,

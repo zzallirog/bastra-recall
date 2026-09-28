@@ -92,7 +92,8 @@ after(async () => {
 
 // ─── The phrasing gate ───────────────────────────────────────────
 
-/** Prompts that ARE the question the graph answers, in both languages. */
+/** Prompts that ARE the question the graph answers — a question, in any
+ *  language, that names a target. */
 const POSITIVE: readonly string[] = [
   "Was bricht, wenn ich saveMemory umbenenne?",
   "Was geht kaputt, wenn ich packages/core/src/save.ts ändere?",
@@ -111,6 +112,11 @@ const POSITIVE: readonly string[] = [
   "what's the blast radius of renaming saveMemory?",
   "impact of changing validateMemory?",
   "will anything stop compiling if I touch saveMemory?",
+  // No phrase list any more: the same question in languages it never knew.
+  "Что сломается, если я переименую saveMemory?",
+  "saveMemory を変えたら何が壊れる？",
+  "validateMemory'yi kim çağırıyor?",
+  "Mitä rikkoutuu, jos muutan save.ts:ää?",
 ];
 
 /**
@@ -126,13 +132,13 @@ const NEGATIVE: readonly string[] = [
   "Mach den Build grün.",
   "Welche Dateien liegen in packages/core/src?",
   "Zeig mir die letzten fünf Commits.",
-  "Warum schlägt der Test in save.test.ts fehl?",
+
   "Kannst du den Lint-Fehler beheben?",
   "Füge saveMemory eine Doku-Zeile hinzu.",
   "Was ist der Unterschied zwischen BM25 und RRF?",
   "Bitte committe das.",
   "Lies packages/core/src/save.ts und fasse es zusammen.",
-  "Wie viele Zeilen hat save.ts?",
+
   "Benenne die Variable input in payload um.",
   "Ich habe saveMemory schon angepasst, danke.",
   "Was bricht eigentlich immer bei dir?",
@@ -142,7 +148,7 @@ const NEGATIVE: readonly string[] = [
   "refactor save.ts to use async/await",
   "add a changelog entry",
   "run the tests",
-  "what does validateMemory return?",
+
   "explain the difference between the two lanes",
   "which files did you change?",
   "open packages/core/src/save.ts",
@@ -152,10 +158,30 @@ const NEGATIVE: readonly string[] = [
   "what breaks down in this explanation?",
   "commit and push",
   "update the README",
+
+];
+
+/**
+ * The price of reading the shape instead of the words: a question that names
+ * a target for another reason also passes the first half. The graph still has
+ * to resolve the target, and the lane is opt-in (#607). Pinned so the cost
+ * stays visible.
+ */
+const QUESTION_ABOUT_A_TARGET: readonly string[] = [
+  "Warum schlägt der Test in save.test.ts fehl?",
+  "Wie viele Zeilen hat save.ts?",
+  "what does validateMemory return?",
   "is saveMemory exported?",
 ];
 
-describe("change-impact intent gate: the phrasing half", () => {
+describe("change-impact intent gate: the question half", () => {
+  it("a question about a named target passes the first half, whatever it asks (the known cost)", () => {
+    for (const p of QUESTION_ABOUT_A_TARGET) {
+      const intent = changeImpactIntent(p);
+      assert.equal(intent.asked && (intent.paths.length > 0 || intent.symbols.length > 0), true, p);
+    }
+  });
+
   for (const prompt of POSITIVE) {
     it(`asks: ${prompt}`, () => {
       assert.equal(changeImpactIntent(prompt).asked, true);

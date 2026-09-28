@@ -23,6 +23,7 @@ import { Vault, SearchIndex, AUTO_RELATED_START } from "@bastra-recall/core";
 import { Telemetry } from "../src/telemetry.js";
 import { recallHandler, loadMemoryHandler, saveMemoryHandler, truncateSummary, type ToolDeps } from "../src/tool-handlers.js";
 import { withSemanticInjection, type SaveQualityResult } from "../src/save-quality.js";
+import { setCommonTermSource } from "../src/common-terms.js";
 import { commonsRankFactor, buildVerificationRecord, verificationRecordPath, loadVerificationCounts } from "../src/cli/commons.js";
 
 const LONG_SUMMARY =
@@ -328,6 +329,8 @@ test("S14: the semantic injection pass adds its advisory only with an embedder, 
 
 test("save_memory returns advisory save_quality with low score for generic triggers", async () => {
   const { deps, close } = await makeDeps();
+  // The vault's own filler: words in a fifth of its bodies (no tech-word list).
+  setCommonTermSource((t) => t === "css" || t === "swift");
   try {
     const res = await saveMemoryHandler(deps, {
       title: "generic css lesson",
@@ -340,6 +343,8 @@ test("save_memory returns advisory save_quality with low score for generic trigg
       recall_when: ["css", "swift"],
     });
     assert.ok(res.save_quality); // #542: absent only on a conflict diversion
+    // One-word triggers alone cost 50; a tag this vault uses everywhere
+    // (common-terms.ts) is generic on top — "css" is, in this vault.
     assert.equal(res.save_quality.band, "low");
     assert.ok(res.save_quality.score < 50, `expected low score, got ${res.save_quality.score}`);
     assert.ok(
@@ -348,53 +353,35 @@ test("save_memory returns advisory save_quality with low score for generic trigg
     );
     assert.ok(res.save_quality.suggestions.length > 0, "expected concrete tightening suggestion");
   } finally {
+    setCommonTermSource(null);
     await close();
   }
 });
 
-test("save_memory admission rules (#159): negative claim without fix + imperative lead flagged", async () => {
+test("save_memory (#159): the EN/DE phrasing nudges are gone — no language is judged by its wording", async () => {
   const { deps, close } = await makeDeps();
   try {
-    const res = await saveMemoryHandler(deps, {
-      title: "Never use the chrome extension — it is broken",
-      type: "lesson",
-      summary: "The chrome extension does not work in the flaky-panel environment when starting a capture run.",
-      body: "It failed twice during the capture experiments in the panel environment.",
-      topic_path: ["lean-test", "admission"],
-      tags: ["admission-rules"],
-      scope: "lean-test",
-      recall_when: ["about to start a capture run in the flaky panel environment"],
-    });
-    assert.ok(res.save_quality); // #542: absent only on a conflict diversion
-    assert.ok(
-      res.save_quality.issues.some((i) => i.includes("negative capability claim")),
-      "broken-claim without a fix should be flagged",
-    );
-    assert.ok(
-      res.save_quality.issues.some((i) => i.includes("imperative phrasing")),
-      "imperative lead should be flagged",
-    );
-
-    // the same failure WITH a fix in the body passes the negative-claim rule
-    const fixed = await saveMemoryHandler(deps, {
-      title: "chrome extension needs the debug bridge enabled",
-      type: "lesson",
-      summary: "The extension refused connections until the debug bridge flag was enabled — fix: enable it in setup.",
-      body: "**Why:** bridge flag off by default. **How to apply:** enable chrome://flags debug bridge before capture runs.",
-      topic_path: ["lean-test", "admission"],
-      tags: ["admission-rules"],
-      scope: "lean-test",
-      recall_when: ["chrome extension refuses connections during capture setup"],
-    });
-    assert.ok(fixed.save_quality); // #542: absent only on a conflict diversion
-    assert.ok(
-      !fixed.save_quality.issues.some((i) => i.includes("negative capability claim")),
-      "captured fix must not be flagged",
-    );
-    assert.ok(
-      !fixed.save_quality.issues.some((i) => i.includes("imperative phrasing")),
-      "declarative title must not be flagged",
-    );
+    for (const [title, summary] of [
+      ["Never use the chrome extension — it is broken", "The chrome extension does not work in the flaky-panel environment."],
+      ["Никогда не используй расширение — оно сломано", "Расширение не работает в окружении flaky-panel."],
+    ]) {
+      const res = await saveMemoryHandler(deps, {
+        title,
+        type: "lesson",
+        summary,
+        body: "It failed twice during the capture experiments in the panel environment.",
+        topic_path: ["lean-test", "admission"],
+        tags: ["admission-rules"],
+        scope: "lean-test",
+        recall_when: ["about to start a capture run in the flaky panel environment"],
+        overwrite: true,
+      });
+      assert.ok(res.save_quality);
+      assert.ok(
+        !res.save_quality.issues.some((i) => i.includes("negative capability claim") || i.includes("imperative phrasing")),
+        `the same note is judged the same in every language: ${title}`,
+      );
+    }
   } finally {
     await close();
   }
@@ -585,84 +572,49 @@ test("save_memory returns high save_quality for specific anchored triggers", asy
   }
 });
 
-// #231 (language-first recall): save_quality advises when recall_when reads as
-// English on a non-English vault — the hook generates English queries, so the
-// highest-weighted field can't match English-authored triggers there. Advisory
-// only, conservative (fires only on a confident "en" detection).
-test("save_quality (#231): recall_when language-mismatch advisory is conservative", async () => {
+// #231 (language-first recall): save_quality advises when recall_when is
+// written in another SCRIPT than the primary language — measured by script
+// share (CLDR likely subtags), not by guessing English from function words.
+test("save_quality (#231): recall_when script-mismatch advisory", async () => {
   const { deps, close } = await makeDeps();
-  // #542: save_quality is absent only on a conflict diversion — no advisory
-  // there, so no lang-mismatch hint either.
   const hasLangHint = (r: Awaited<ReturnType<typeof saveMemoryHandler>>): boolean =>
-    r.save_quality?.issues.some((i) => i.includes("reads as English")) ?? false;
+    r.save_quality?.issues.some((i) => i.includes("another script than your primary language")) ?? false;
+  let n = 0;
+  const save = (recall_when: string[]) =>
+    saveMemoryHandler(deps, {
+      title: `checkout payment retry script case ${++n}`,
+      type: "lesson",
+      summary: "Guard against duplicate charges when retrying a failed checkout payment webhook.",
+      body: "Retry the payment webhook idempotently.",
+      topic_path: ["checkout", "payments"],
+      tags: [`checkout-payments-${n}`],
+      scope: `lang-${n}`,
+      recall_when,
+    });
+  const english = ["about to refactor the checkout payment retry logic", "debugging a failed payment webhook in the orders service"];
   try {
-    // (a) primary=de + purely English recall_when → hint fires.
+    // (a) primary=ru + Latin-only recall_when → hint fires.
+    deps.primaryLanguage = "ru";
+    assert.ok(hasLangHint(await save(english)), "ru primary + Latin-script triggers surface the advisory");
+    // (b) primary=ru + Russian triggers with English tech anchors → no hint.
+    assert.ok(
+      !hasLangHint(await save(["рефакторинг логики checkout payment retry", "падает payment webhook в orders service"])),
+      "Russian triggers with English anchors must NOT trip the advisory",
+    );
+    // (c) the same for Japanese and Arabic — no language is special.
+    deps.primaryLanguage = "ja";
+    assert.ok(hasLangHint(await save(english)));
+    assert.ok(!hasLangHint(await save(["checkout の payment retry ロジックを直す前", "orders service の webhook が落ちたとき"])));
+    deps.primaryLanguage = "ar";
+    assert.ok(hasLangHint(await save(english)));
+    // (d) primary=de/en: English triggers share the script — no hint either way.
     deps.primaryLanguage = "de";
-    const english = await saveMemoryHandler(deps, {
-      title: "checkout payment retry language case a",
-      type: "lesson",
-      summary: "Guard against duplicate charges when retrying a failed checkout payment webhook.",
-      body: "Retry the payment webhook idempotently.",
-      topic_path: ["checkout", "payments"],
-      tags: ["checkout-payments"],
-      scope: "lang-a",
-      recall_when: [
-        "about to refactor the checkout payment retry logic",
-        "debugging a failed payment webhook in the orders service",
-      ],
-    });
-    assert.ok(hasLangHint(english), "de primary + English recall_when should surface the language advisory");
-
-    // (b) primary=de + German recall_when with English tech anchors → NO hint.
-    deps.primaryLanguage = "de";
-    const german = await saveMemoryHandler(deps, {
-      title: "checkout payment retry language case b",
-      type: "lesson",
-      summary: "Doppelbuchungen vermeiden, wenn der fehlgeschlagene checkout payment webhook erneut läuft.",
-      body: "Den payment webhook idempotent wiederholen.",
-      topic_path: ["checkout", "payments"],
-      tags: ["checkout-payments-de"],
-      scope: "lang-b",
-      recall_when: [
-        "beim Refactoring der checkout payment retry Logik",
-        "wenn der payment webhook im orders service fehlschlägt",
-      ],
-    });
-    assert.ok(!hasLangHint(german), "German triggers with English anchors must NOT trip the advisory");
-
-    // (c) primary unset → check never fires, even on English recall_when.
-    deps.primaryLanguage = undefined;
-    const unset = await saveMemoryHandler(deps, {
-      title: "checkout payment retry language case c",
-      type: "lesson",
-      summary: "Guard against duplicate charges when retrying a failed checkout payment webhook.",
-      body: "Retry the payment webhook idempotently.",
-      topic_path: ["checkout", "payments"],
-      tags: ["checkout-payments-c"],
-      scope: "lang-c",
-      recall_when: [
-        "about to refactor the invoice reconciliation batch job",
-        "debugging a stuck settlement export in the billing service",
-      ],
-    });
-    assert.ok(!hasLangHint(unset), "unset primary language must never trip the advisory");
-
-    // (d) primary=en → English recall_when is expected, no hint.
+    assert.ok(!hasLangHint(await save(english)), "same script, no guess about the language");
     deps.primaryLanguage = "en";
-    const enPrimary = await saveMemoryHandler(deps, {
-      title: "checkout payment retry language case d",
-      type: "lesson",
-      summary: "Guard against duplicate charges when retrying a failed checkout payment webhook.",
-      body: "Retry the payment webhook idempotently.",
-      topic_path: ["checkout", "payments"],
-      tags: ["checkout-payments-d"],
-      scope: "lang-d",
-      recall_when: [
-        "about to tune the search reranker cutoff for short queries",
-        "debugging a slow vector recall path in the daemon",
-      ],
-    });
-    assert.ok(!hasLangHint(enPrimary), "primary=en must never trip the advisory");
+    assert.ok(!hasLangHint(await save(english)));
+    // (e) primary unset → never.
+    deps.primaryLanguage = undefined;
+    assert.ok(!hasLangHint(await save(english)), "unset primary language must never trip the advisory");
   } finally {
     await close();
   }

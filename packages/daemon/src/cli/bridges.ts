@@ -46,7 +46,7 @@ import {
 import { runInBandMint, readLastMint, recordHarvestRun, LAST_MINT_FILE, memoryTermsGetter } from "../learned-recall/mint-job.js";
 import { contributionVerdict, verifyBridges, STRATA, SERVING_K, type VerifyReport } from "../learned-recall/verify.js";
 import { ollamaChat, listOllamaModels, resolveRerankModel } from "../learned-recall/reranker.js";
-import { isSupportedLanguage, SUPPORTED_LANGUAGES } from "../learned-recall/language.js";
+import { isSupportedLanguage } from "../learned-recall/language.js";
 
 /** #648: the local pool (`bridges/`, `last-mint.json`) is per-box state and
  *  lives in its own directory, not inside the git checkout of the shared
@@ -162,10 +162,11 @@ export async function cmdBridges(opts: { sub: string | null; positional?: string
         process.stdout.write("✓ query-language override cleared — queries consult every language folder\n");
         return 0;
       }
-      // Validate against the SAME set the daemon enforces at boot (SUPPORTED_LANGUAGES),
-      // so the CLI never confirms an override the daemon would silently discard.
+      // Validate with the SAME check the daemon enforces at boot (isSupportedLanguage:
+      // any language code CLDR names), so the CLI never confirms an override the
+      // daemon would silently discard.
       if (!isSupportedLanguage(lang.toLowerCase())) {
-        process.stderr.write(`✗ unsupported language '${lang}' — the override accepts: ${SUPPORTED_LANGUAGES.join(", ")} (or 'auto' to clear; without an override every language folder is consulted, #707)\n`);
+        process.stderr.write(`✗ unknown language code '${lang}' — the override takes a language code such as de, ru, ja, sw (or 'auto' to clear; without an override every language folder is consulted, #707)\n`);
         return 2;
       }
       await setSharedRecallLanguage(lang);

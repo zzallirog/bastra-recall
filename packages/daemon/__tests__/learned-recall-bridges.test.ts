@@ -236,11 +236,11 @@ test("BridgePool.load caps oversized terms from a foreign repo and drops fully-o
   });
 });
 
-test("expandQuery appends matching expansion terms and routes on detected language", async () => {
+test("expandQuery appends matching expansion terms; without a configured language every folder answers", async () => {
   const deB = bridge({ lang: "de", trigger_terms: ["panel"], expansion_terms: ["resignkey", "observer"] });
   await withPool([deB], async (pool) => {
     const r = expandQuery("warum schließt sich das Panel wieder", pool);
-    assert.equal(r.lang, "de");
+    assert.equal(r.lang, "und", "no guess from German function words: und, and the de folder is consulted");
     assert.ok(r.added.includes("resignkey"));
     assert.ok(r.query.includes("resignkey"), "expansion appended to query");
     assert.ok(r.query.startsWith("warum schließt"), "original query preserved");
@@ -271,7 +271,7 @@ test("expandQuery is a no-op for a null pool; an abstained language consults eve
   const deB = bridge({ lang: "de", trigger_terms: ["panel"], expansion_terms: ["resignkey"] });
   const enB = bridge({ lang: "en", trigger_terms: ["nspanel", "observer"], expansion_terms: ["attachedsheet"] });
   await withPool([deB, enB], async (pool) => {
-    // code-shaped query → detection abstains → filed as "und", but the pool is consulted
+    // no configured language → "und", and the whole pool is consulted
     const r = expandQuery("NSPanel resignKey Observer", pool);
     assert.equal(r.lang, "und");
     assert.deepEqual(r.added, ["attachedsheet"], "the trigger rule decides, not the language");

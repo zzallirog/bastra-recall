@@ -20,20 +20,3 @@
  *  Inhaltswort ist. Gleicher Wert wie `MIN_TOKEN_LEN` im Reflex-Pfad — ein
  *  Wort, keine zwei Zahlen. */
 export const MIN_SIGNIFICANT_TOKEN_LEN = 3;
-
-/**
- * #707: Wörter, die eine `recall_when`-Phrase in Alternativen teilen
- * („Nachricht oder Antwort entwerfen" → zwei Phrasen). Vorher ein festes
- * `oder|or` in `reflex.ts`. Daten pro Sprache; der sprachneutrale Teil ist
- * strukturell: ein freistehendes `/` oder `|` teilt in jeder Schrift. Eine
- * Sprache ohne Eintrag und ohne Trennzeichen fällt auf die normale Regel
- * zurück (alle Inhaltstokens müssen im Kontext stehen) — strenger, nie stumm
- * für die ganze Sprache.
- */
-export const ALTERNATIVE_WORDS_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  en: ["or"],
-  de: ["oder"],
-  ru: ["или"],
-};
-
-export const ALTERNATIVE_WORDS: ReadonlySet<string> = new Set(Object.values(ALTERNATIVE_WORDS_BY_LANGUAGE).flat());

@@ -268,6 +268,17 @@ test("persistLanguageSetting: explicit language names map to ISO codes (Latin + 
     ["en français, tutoiement", "fr"],
     ["日本語で、簡潔に", "ja"],
     ["中文，简洁", "zh"],
+    // Any language CLDR names, in its own name, inflected or behind a prefix.
+    ["українською, коротко", "uk"],
+    ["Türkçe lütfen", "tr"],
+    ["suomeksi kiitos", "fi"],
+    ["بالعربية من فضلك", "ar"],
+    ["בעברית בבקשה", "he"],
+    ["Kiswahili tafadhali", "sw"],
+    ["tiếng Việt nhé", "vi"],
+    ["한국어로", "ko"],
+    // A first name that resembles a language name is not one ("Daniel" ~ Danish).
+    ["Daniel · Deutsch", "de"],
   ];
   for (const [identity, expected] of cases) {
     const dir = await mkdtemp(join(tmpdir(), "bastra-lang-name-"));
@@ -281,13 +292,14 @@ test("persistLanguageSetting: explicit language names map to ISO codes (Latin + 
   }
 });
 
-test("persistLanguageSetting: falls back to detection over all answers when no name is given", async () => {
+test("persistLanguageSetting: no language named → nothing written, nothing guessed from words", async () => {
   const { persistLanguageSetting } = await import("../src/onboarding.js");
   const { getPrimaryLanguage } = await import("../src/settings.js");
   const dir = await mkdtemp(join(tmpdir(), "bastra-onboard-lang-fb-"));
   const settingsPath = join(dir, "cli-settings.json");
   try {
-    // No language name anywhere; German function words carry the detection.
+    // German prose, but no language named: the old de/en function-word guess
+    // (which called Finnish German) is gone for every language alike.
     await persistLanguageSetting(
       {
         identity: "Sam, bitte kurz und technisch",
@@ -295,7 +307,7 @@ test("persistLanguageSetting: falls back to detection over all answers when no n
       },
       settingsPath,
     );
-    assert.equal(await getPrimaryLanguage(settingsPath), "de", "detected from German function words");
+    assert.equal(await getPrimaryLanguage(settingsPath), undefined, "no name, no guess");
   } finally {
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }

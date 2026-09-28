@@ -7,8 +7,8 @@
  *   todo-lane        the tokenizer keeps every script; no task-verb list
  *   tool-handlers    acted-on tokens keep non-Latin words
  *   taxonomy         a convention title in Cyrillic covers its cluster
- *   reflex           alternatives split by per-language data (`или`) and by a
- *                    free-standing `/` in any script
+ *   reflex           a free-standing `/` splits alternatives in any script;
+ *                    a language's word for "or" is not a splitter
  *   save-quality     the #159 admission flags come from the user's lexicon
  *                    files only (none shipped): no file, no penalty in any
  *                    language; a code span counts as the fix in any script
@@ -153,8 +153,9 @@ test("#707 taxonomy: a convention title in Cyrillic covers its cluster", async (
 
 const ctx = (text: string): Set<string> => new Set(tokenizeWithIdentifiers(text.toLowerCase()));
 
-test("#707 reflex: Russian 'или' splits alternatives (per-language data)", () => {
-  assert.equal(phraseMatchesContext("письмо или ответ написать", ctx("надо ответ написать")), true);
+test("#707 reflex: Russian 'или' is not a splitter (no word list) — the phrase gets stricter, '/' splits", () => {
+  assert.equal(phraseMatchesContext("письмо или ответ написать", ctx("надо ответ написать")), false, "every content token required");
+  assert.equal(phraseMatchesContext("письмо / ответ написать", ctx("надо ответ написать")), true);
 });
 
 test("#707 reflex: a free-standing '/' splits alternatives in an unlisted language", () => {
