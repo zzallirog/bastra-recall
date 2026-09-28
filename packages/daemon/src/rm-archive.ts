@@ -445,13 +445,25 @@ export function runRmShim(argv: string[], io: ShimIo = {}): number {
     for (let n = 2; existsSync(dest); n++) dest = `${base}~${n}`;
     const kind = classify(real, isDir);
     const bytes = sizeOf(real);
-    let made: string | undefined;
+    // #F13: which ancestors of dest's parent already existed BEFORE this
+    // attempt — the boundary the cleanup below must not cross. Needed
+    // because `mkdirSync(recursive)` itself can throw partway (ENOSPC on a
+    // near-full disk): it then never returns, so the old cleanup — which
+    // trusted that return value — saw `made === undefined` and skipped the
+    // loop entirely, leaving the directory levels it DID create behind as
+    // permanent, empty, dated litter.
+    const preExisting = new Set<string>();
+    for (let d = dirname(dest); ; d = dirname(d)) {
+      if (existsSync(d)) preExisting.add(d);
+      if (dirname(d) === d) break;
+    }
     try {
-      made = mkdirSync(dirname(dest), { recursive: true });
+      mkdirSync(dirname(dest), { recursive: true });
       renameSync(real, dest);
     } catch (e) {
-      // Only the empty directories this mkdir made; rmdir refuses anything else.
-      for (let d = dirname(dest); made && d.length >= made.length; d = dirname(d)) {
+      // Only the directory levels this attempt created — anything that
+      // already existed is left alone, and rmdir refuses anything non-empty.
+      for (let d = dirname(dest); !preExisting.has(d); d = dirname(d)) {
         try {
           rmdirSync(d);
         } catch {
