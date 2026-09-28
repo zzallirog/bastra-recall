@@ -4,6 +4,7 @@ import type { EmbeddingIndex } from "./embeddings.js";
 import { fuseRRF, RRF_SCALE } from "./embeddings.js";
 import type { RecallStage, StageListener } from "./recall-stages.js";
 import { normalizeQuery, tokenizeWithIdentifiers } from "./query-normalize.js";
+import { foldTerm } from "./lexical.js";
 import { PHRASE_STOPWORDS, MIN_SIGNIFICANT_TOKEN_LEN } from "./stopwords.js";
 import { DocFreqMiniSearch } from "./doc-freq-index.js";
 import { rareTermFuzzy } from "./bm25-expansion.js";
@@ -124,7 +125,7 @@ function matchedRecallWhen(
   const match = r.match;
   if (!match || queryTerms.size === 0) return false;
   for (const [term, fields] of Object.entries(match)) {
-    if (fields.includes("recall_when_flat") && queryTerms.has(term.toLowerCase())) return true;
+    if (fields.includes("recall_when_flat") && queryTerms.has(foldTerm(term))) return true;
   }
   return false;
 }
@@ -194,7 +195,7 @@ function anchorStrength(
 
   const matchedTriggerTerms = new Set<string>();
   for (const [term, fields] of Object.entries(match)) {
-    const folded = term.toLowerCase();
+    const folded = foldTerm(term);
     if (fields.includes("recall_when_flat") && queryTerms.has(folded)) {
       matchedTriggerTerms.add(folded);
     }
@@ -211,7 +212,7 @@ function anchorStrength(
     for (const word of phrase.split(/\s+/)) {
       if (!word) continue;
       for (const rawToken of tokenizeWithIdentifiers(word)) {
-        const folded = rawToken.toLowerCase();
+        const folded = foldTerm(rawToken);
         if (!matchedTriggerTerms.has(folded)) continue;
         const df = recallWhenDocFreq(folded);
         if (looksLikeIdentifier(rawToken) && df > 0 && df <= ANCHOR_RARE_DF_MAX) return "strong";
@@ -246,7 +247,7 @@ function anchorStrength(
     const originTerms = new Map<string, Set<string>>();
     for (const word of phrase.split(/\s+/)) {
       if (!word) continue;
-      const emitted = tokenizeWithIdentifiers(word).map((t) => t.toLowerCase());
+      const emitted = tokenizeWithIdentifiers(word).map(foldTerm);
       if (emitted.length === 0) continue;
       const hits = emitted.filter((t) => matchedTriggerTerms.has(t) && isSignificantTriggerTerm(t));
       if (hits.length === 0) continue;
@@ -551,7 +552,7 @@ export class SearchIndex {
   /** Wie viele Memories tragen `term` (gefaltet) in ihrem `recall_when` —
    *  DISTINKTE Memories, nicht die feldübergreifende Summe. */
   private recallWhenDocFreq(term: string): number {
-    return this.recallWhenTermFreq.get(term.toLowerCase()) ?? 0;
+    return this.recallWhenTermFreq.get(foldTerm(term)) ?? 0;
   }
 
   // Query-Cache (#30): MiniSearch tokenisiert die Query bei jedem
@@ -596,6 +597,9 @@ export class SearchIndex {
       // ohne `searchOptions.tokenize` auf diese Funktion zurück; KEIN separates
       // searchOptions.tokenize setzen, sonst bricht die Symmetrie (query-normalize.ts).
       tokenize: tokenizeWithIdentifiers,
+      // One case fold for index AND query (MiniSearch reuses it for search):
+      // locale-independent, Turkish İ/ı and German ß fold with their pairs.
+      processTerm: (term: string) => foldTerm(term),
       fields: [
         "title",
         "summary",
@@ -1476,7 +1480,7 @@ export class SearchIndex {
     // weil dort kein neuer Stand mehr kommt.
     this.forgetRecallWhenTerms(fm.id);
     const recallWhenTerms = new Set(
-      tokenizeWithIdentifiers(fm.recall_when.join(" ")).map((t) => t.toLowerCase()),
+      tokenizeWithIdentifiers(fm.recall_when.join(" ")).map(foldTerm),
     );
     for (const t of recallWhenTerms) {
       this.recallWhenTermFreq.set(t, (this.recallWhenTermFreq.get(t) ?? 0) + 1);

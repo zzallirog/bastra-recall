@@ -1,4 +1,4 @@
-import { segmentWords, sameWordForm, WORD_FORM_MIN_LEN } from "./lexical.js";
+import { foldTerm, letterCount, normalizeText, segmentWords, sameWordForm, WORD_FORM_MIN_LEN } from "./lexical.js";
 /**
  * #230 / #249 — the "nothing really matched" signal, shared by every recall path.
  *
@@ -41,18 +41,20 @@ import type { RecallHit } from "./search.js";
  *  every query term that starts with it. */
 function prefixOfLongEnough(a: string, b: string): boolean {
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  return [...short].length >= WORD_FORM_MIN_LEN && long.startsWith(short);
+  return letterCount(short) >= WORD_FORM_MIN_LEN && long.startsWith(short);
 }
 
 export function hitTitleMatches(hit: RecallHit): boolean {
   if (!hit.matched_terms || hit.matched_terms.length === 0) return false;
-  const titleTokens = hit.title
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
+  // Marks belong to their word: a Devanagari vowel sign or virama is not a
+  // separator (\p{M}), or "हिन्दी" falls apart into ह/न/द.
+  const titleTokens = normalizeText(hit.title)
+    .split(/[^\p{L}\p{M}\p{N}]+/u)
     .filter(Boolean)
-    .flatMap(segmentWords);
+    .flatMap(segmentWords)
+    .map(foldTerm);
   return hit.matched_terms.some((term) => {
-    const t = term.toLowerCase();
+    const t = foldTerm(term);
     return titleTokens.some((tok) => tok === t || sameWordForm(tok, t) || prefixOfLongEnough(tok, t));
   });
 }

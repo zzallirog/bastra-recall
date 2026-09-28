@@ -14,6 +14,7 @@
  */
 import type { Vault } from "@bastra-recall/core";
 import { scopeEquals } from "@bastra-recall/core/scope";
+import { foldTerm, isSignificantLength } from "@bastra-recall/core";
 import { envInt } from "./env.js";
 
 export interface ConventionLean {
@@ -82,7 +83,7 @@ const NOISE_KEYS = new Set([
 const VERSION_TAG = /^v\d+\.\d+(?:\.\d+)?$/;
 
 function norm(s: string): string {
-  return s.trim().toLowerCase();
+  return foldTerm(s.trim());
 }
 
 const PEOPLE_TOPIC_ROOT = "people";
@@ -125,8 +126,8 @@ export function detectTaxonomyDrift(vault: Vault, now: number = Date.now()): Dri
     for (const seg of c.fm.topic_path) covered.add(norm(seg));
     // #707: letters of every script — `[a-zäöüß]` cut a Cyrillic or Greek
     // title into nothing, so its words never counted as covered.
-    for (const w of c.fm.title.toLowerCase().split(/[^\p{L}\p{M}\p{N}_-]+/u)) {
-      if (w.length >= 3) covered.add(w);
+    for (const w of norm(c.fm.title).split(/[^\p{L}\p{M}\p{N}_-]+/u)) {
+      if (isSignificantLength(w, 3)) covered.add(w);
     }
   }
 
@@ -159,7 +160,7 @@ export function detectTaxonomyDrift(vault: Vault, now: number = Date.now()): Dri
       if (!candidates.has(k)) candidates.set(k, "topic");
     }
     for (const [key, kind] of candidates) {
-      if (key.length < 3) continue;
+      if (!isSignificantLength(key, 3)) continue;
       if (NOISE_KEYS.has(key) || VERSION_TAG.test(key) || scopeNames.has(key) || covered.has(key)) continue;
       let entry = clusters.get(key);
       if (!entry) {

@@ -33,6 +33,7 @@
 import type { Memory } from "./schema.js";
 import type { RecallHit } from "./search.js";
 import { tokenizeWithIdentifiers } from "./query-normalize.js";
+import { foldTerm, isSignificantLength, normalizeText } from "./lexical.js";
 
 /** §10.3: die Produktsemantik von V1.0. */
 export type RecallDecision =
@@ -158,9 +159,8 @@ function hasExactIdentifier(input: DecisionInput): boolean {
     input.hit.title,
     ...(m ? [m.fm.title, ...(m.fm.recall_when ?? [])] : []),
   ]
-    .join(" \n ")
-    .toLowerCase();
-  return candidates.some((t) => haystack.includes(t.toLowerCase()));
+    .join(" \n ");
+  return candidates.some((t) => foldTerm(normalizeText(haystack)).includes(foldTerm(t)));
 }
 
 /**
@@ -171,7 +171,9 @@ function hasExactIdentifier(input: DecisionInput): boolean {
  * auseinander, und diese Zahl ist die Kennzahl der autorisierten.
  */
 function recallWhenCoverage(input: DecisionInput): number {
-  const terms = input.queryTerms.filter((t) => t.length >= 3);
+  // Three letters, two characters in a spaceless script: a two-character
+  // Chinese or Japanese word is a term, not a fragment (lexical.ts).
+  const terms = input.queryTerms.filter((t) => isSignificantLength(t, 3));
   if (terms.length === 0) return 0;
   const triggerText = (input.memory?.fm.recall_when ?? []).join(" \n ");
   if (triggerText.trim().length === 0) {
@@ -182,8 +184,8 @@ function recallWhenCoverage(input: DecisionInput): number {
   // Ganze Tokens vergleichen, nicht Teilstrings: sonst zählt `art` in
   // `party` und eine Ein-Term-Query öffnet den harten Anker (#440). Derselbe
   // Tokenizer wie auf der Query-Seite hält beide Seiten symmetrisch.
-  const triggers = new Set(tokenizeWithIdentifiers(triggerText).map((t) => t.toLowerCase()));
-  const hits = terms.filter((t) => triggers.has(t.toLowerCase())).length;
+  const triggers = new Set(tokenizeWithIdentifiers(triggerText).map(foldTerm));
+  const hits = terms.filter((t) => triggers.has(foldTerm(t))).length;
   return Number((hits / terms.length).toFixed(4));
 }
 

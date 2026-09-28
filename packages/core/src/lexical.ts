@@ -11,14 +11,26 @@
  * one-letter preposition in a title anchored every query, and Japanese —
  * written without spaces — reached every matcher as one sentence-long token.
  *
- * Two rules, no word lists, no language detection:
+ * Rules, no word lists, no language detection:
  *
- * 1. `segmentWords` — scripts written without spaces between words (Han,
- *    Hiragana, Katakana, Thai, Lao, Khmer, Myanmar) are split by ICU word
- *    segmentation (`Intl.Segmenter`, full ICU ships with Node). Every other
- *    run is returned unchanged, so identifier handling upstream of this
- *    stays exactly as it was.
- * 2. `sameWordForm` — two tokens are the same word when they differ only in
+ * 1. `normalizeText` / `foldTerm` — the one spelling every matcher compares:
+ *    NFKC (NFD text from macOS, fullwidth ＡＰＩ and half-width ｶﾅ from an
+ *    IME), invisible format characters (ZWSP, ZWNJ, soft hyphen, bidi marks)
+ *    and Arabic tatweel removed, the optional vowel points of the abjads
+ *    (Hebrew niqqud, Arabic harakat) dropped; `foldTerm` adds a case fold that
+ *    does not depend on the host locale and treats Turkish İ/ı and German ß
+ *    like their pairs ("İ" and "ı" both fold to "i", "ß" to "ss").
+ * 2. `segmentWords` — scripts written without spaces between words (Unicode
+ *    line-break classes ID and SA: Han, Kana, Bopomofo, Yi, Thai, Lao, Khmer,
+ *    Myanmar, the Tai scripts; Tibetan separates syllables with the tsheg)
+ *    are split by ICU word segmentation (`Intl.Segmenter`, full ICU ships with
+ *    Node). Every other run is returned unchanged, so identifier handling
+ *    upstream of this stays exactly as it was.
+ * 3. `letterCount` — a word's length is its letters, not its code points:
+ *    Devanagari vowel signs and Hebrew/Arabic points are marks and do not
+ *    count ("में" is one letter), a Hangul syllable counts its jamo ("배포" is
+ *    four), so every length threshold means the same thing in every script.
+ * 4. `sameWordForm` — two tokens are the same word when they differ only in
  *    an ending: a long enough common prefix and a short enough length gap.
  *    This is the inflection rule of every language that inflects by suffix
  *    (Russian, German, English, Japanese okurigana) and it needs no stemmer.
@@ -26,8 +38,58 @@
  *    nothing.
  */
 
+/**
+ * Scripts whose words are not separated by spaces: Unicode line-break class ID
+ * (ideographs, kana, Bopomofo, Yi, Tangut, Nüshu, Khitan) and SA (the South East
+ * Asian scripts ICU breaks by dictionary or syllable), plus Tibetan, whose
+ * tsheg separates syllables, not words. A property of the script, not a list
+ * of languages: every language written in one of them gets the same rule.
+ */
 const SPACELESS_SCRIPT_RE =
-  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}\p{Script=Yi}\p{Script=Tangut}\p{Script=Nushu}\p{Script=Khitan_Small_Script}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tai_Tham}\p{Script=Tai_Viet}\p{Script=New_Tai_Lue}\p{Script=Tai_Le}\p{Script=Ahom}\p{Script=Tibetan}]/u;
+
+const ASCII_RE = /^[\x00-\x7f]*$/;
+/** Invisible format characters (ZWSP, ZWNJ, ZWJ, soft hyphen, bidi marks,
+ *  BOM) and Arabic tatweel: typography, never part of a word's identity. */
+const INVISIBLE_RE = /[\p{Cf}\u0640]/gu;
+/** The optional vowel points of the abjads: niqqud, harakat, shadda. Written
+ *  in textbooks and poetry, left out everywhere else — the word is the same. */
+const ABJAD_POINT_RE = /(?=\p{Mn})[\p{Script_Extensions=Hebrew}\p{Script_Extensions=Arabic}\p{Script_Extensions=Syriac}]/gu;
+/** An apostrophe between two letters of a non-Latin script is part of the
+ *  word — the Ukrainian/Belarusian apostrophe ("п'ятниця", "обʼєкт"), the
+ *  Hebrew geresh typed as "'" ("סטייג'ינג") — and would otherwise split it
+ *  into fragments. Latin keeps the split: there it marks elision and
+ *  contraction ("l'état", "don't"). */
+const INWORD_APOSTROPHE_RE = /(?<=(?!\p{Script=Latin})\p{L}\p{M}*)['\u2019\u02bc\u05f3](?=(?!\p{Script=Latin})\p{L})/gu;
+
+/**
+ * The spelling every matcher compares, case left alone: NFKC, invisible
+ * format characters and tatweel removed, abjad vowel points dropped, an
+ * in-word apostrophe of a non-Latin script joined. Pure, idempotent; identity
+ * for ASCII.
+ */
+export function normalizeText(text: string): string {
+  if (ASCII_RE.test(text)) return text;
+  return text
+    .normalize("NFKC")
+    .replace(INVISIBLE_RE, "")
+    .replace(ABJAD_POINT_RE, "")
+    .replace(INWORD_APOSTROPHE_RE, "")
+    .normalize("NFC");
+}
+
+/**
+ * `normalizeText` plus a case fold that is the same on every host. `toLowerCase`
+ * alone leaves "ß" ≠ "SS"→"ss", and turns Turkish "İ" into "i" + a combining
+ * dot, so a Turkish word typed in capitals never met its lowercase form. The
+ * round trip through upper case folds ß/ẞ, final sigma and long s; the dotted
+ * and dotless i of Turkish fold to "i" together (on a keyboard without them
+ * users type i/I anyway). Idempotent.
+ */
+export function foldTerm(term: string): string {
+  if (ASCII_RE.test(term)) return term.toLowerCase();
+  return normalizeText(term).toUpperCase().toLowerCase().replace(/i\u0307/g, "i");
+}
 
 let segmenter: Intl.Segmenter | null | undefined;
 
@@ -65,12 +127,36 @@ export function segmentWords(token: string): string[] {
 }
 
 const HIRAGANA_ONLY_RE = /^\p{Script=Hiragana}+$/u;
+const LETTER_OR_DIGIT_RE = /[\p{L}\p{N}]/u;
+
+/**
+ * How many letters (and digits) `token` has, marks not counted: canonical
+ * decomposition first, so a precomposed "é" is one letter, a Devanagari vowel
+ * sign or virama is none ("में" = 1, "स्क्रिप्ट" = 5) and a Hangul syllable
+ * counts its jamo ("배포" = 4 — a Korean syllable carries what two or three
+ * Latin letters do). Code points overcount Indic words and undercount Korean
+ * ones; letters make one threshold mean the same thing in every script.
+ */
+export function letterCount(token: string): number {
+  if (ASCII_RE.test(token)) {
+    let n = 0;
+    for (let i = 0; i < token.length; i++) {
+      const c = token.charCodeAt(i);
+      if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) n++;
+    }
+    return n;
+  }
+  let n = 0;
+  for (const ch of token.normalize("NFD")) if (LETTER_OR_DIGIT_RE.test(ch)) n++;
+  return n;
+}
 
 /**
  * Does `token` carry meaning on its own? A Latin or Cyrillic word of two
  * letters is a function word; a two-character Han or Katakana word (移行,
- * 起動, モード) is a content word. `minLen` is the threshold for alphabetic
- * scripts; spaceless scripts need two characters.
+ * 起動, モード) is a content word. `minLen` is the threshold in letters
+ * (`letterCount`) for alphabetic scripts; spaceless scripts need two
+ * characters.
  *
  * A token written only in Hiragana is grammar — particles, auxiliaries and
  * conjugation endings (を, する, とき, ない); Japanese writes its content words
@@ -79,10 +165,9 @@ const HIRAGANA_ONLY_RE = /^\p{Script=Hiragana}+$/u;
  * A rule of the script, not a word list.
  */
 export function isSignificantLength(token: string, minLen: number): boolean {
-  const len = [...token].length;
   if (HIRAGANA_ONLY_RE.test(token)) return false;
-  if (hasSpacelessScript(token)) return len >= Math.min(2, minLen);
-  return len >= minLen;
+  if (hasSpacelessScript(token)) return [...token].length >= Math.min(2, minLen);
+  return letterCount(token) >= minLen;
 }
 
 const LETTERS_ONLY_RE = /^[\p{L}\p{M}]+$/u;

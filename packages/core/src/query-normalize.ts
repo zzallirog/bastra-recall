@@ -68,7 +68,7 @@ export function capAtWordBoundary(text: string, maxChars: number): string {
 // beweisbar linear (CodeQL js/polynomial-redos flaggte die Alternation-Form,
 // obwohl die Zweige disjunkt waren; die v-Flag-Klassen-Union bräuchte
 // target es2024).
-import { hasSpacelessScript, segmentWords } from "./lexical.js";
+import { hasSpacelessScript, normalizeText, segmentWords } from "./lexical.js";
 
 const GLUE_CHARS = new Set([".", "-", "_"]);
 const SPLIT_CHAR_RE = /[\n\r\p{Z}\p{P}]/u;
@@ -111,12 +111,15 @@ function scanRawTokens(text: string): string[] {
  * Gemeinsamer Tokenizer für Index- UND Query-Seite (Symmetrie-Invariante,
  * siehe Header). Emittiert pro Roh-Token den von Rand-Punktuation befreiten
  * Identifier als Ganzes; enthält er inneren Kleber (`.` `-` `_`), zusätzlich
- * seine Teile. Lowercasing übernimmt MiniSearchs `processTerm` — hier nicht
- * duplizieren.
+ * seine Teile. Die Groß-/Kleinschreibung faltet `processTerm` (`foldTerm`) —
+ * hier nicht duplizieren, `looksLikeIdentifier` braucht die rohe Schreibweise.
+ * Normalisiert wird dagegen hier (`normalizeText`: NFKC, unsichtbare Zeichen,
+ * Vokalzeichen der Abjads), weil die Wortgrenzen davon abhängen: ein ZWSP im
+ * Thai-Text oder ein halbbreites ｶﾅ zerlegt sonst anders als seine Normalform.
  */
 export function tokenizeWithIdentifiers(text: string): string[] {
   const out: string[] = [];
-  for (const raw of scanRawTokens(text)) {
+  for (const raw of scanRawTokens(normalizeText(text))) {
     const token = trimGlue(raw);
     if (!token) continue;
     // Han/Kana/Thai/…: no spaces between words, so the raw run is a whole

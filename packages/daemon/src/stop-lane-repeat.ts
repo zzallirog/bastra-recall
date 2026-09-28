@@ -14,6 +14,8 @@
  * too, so the caller only counts a restatement that carries emphasis.
  */
 
+import { foldTerm, hasSpacelessScript, letterCount } from "@bastra-recall/core";
+
 const REPEAT_SIMILARITY_MIN = 0.6;
 /** Short acknowledgements ("ok", "weiter", "continue") are never a restatement. */
 const REPEAT_MIN_LETTERS = 12;
@@ -21,11 +23,26 @@ const REPEAT_MIN_LETTERS = 12;
 const REPEAT_COMPARE_CHARS = 1000;
 
 function bigramSet(content: string): Set<string> | null {
-  const text = (content.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ").slice(0, REPEAT_COMPARE_CHARS);
-  if ((text.match(/\p{L}/gu) ?? []).length < REPEAT_MIN_LETTERS) return null;
+  // Letters with their marks (`\p{M}`: Devanagari vowel signs, Thai tone
+  // marks) in the fold every matcher uses; characters, not UTF-16 units, so an
+  // astral character is one symbol of a bigram, not two surrogate halves.
+  const text = [...(foldTerm(content).match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).join(" ")].slice(0, REPEAT_COMPARE_CHARS);
+  if (weightedLetters(text) < REPEAT_MIN_LETTERS) return null;
   const out = new Set<string>();
-  for (let i = 0; i < text.length - 1; i++) out.add(text.slice(i, i + 2));
+  for (let i = 0; i < text.length - 1; i++) out.add(text[i] + text[i + 1]);
   return out;
+}
+
+/** Letters, where a character of a spaceless script counts two: "把解析器里的调试日志删掉"
+ *  is a full request in twelve characters, which a Latin sentence needs about
+ *  thirty letters for (the same density rule as `isSignificantLength`). */
+function weightedLetters(chars: string[]): number {
+  let n = 0;
+  for (const ch of chars) {
+    if (!/[\p{L}\p{N}]/u.test(ch)) continue;
+    n += hasSpacelessScript(ch) ? 2 : letterCount(ch);
+  }
+  return n;
 }
 
 function dice(a: Set<string>, b: Set<string>): number {

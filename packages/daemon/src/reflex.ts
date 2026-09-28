@@ -29,6 +29,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   tokenizeWithIdentifiers,
+  foldTerm,
   PHRASE_STOPWORDS,
   MIN_SIGNIFICANT_TOKEN_LEN,
   ALTERNATIVE_WORDS,
@@ -115,7 +116,7 @@ function evaluatePhrase(
     const evals = alternatives.map((alt) => evaluatePhrase(alt, contextTokens, contextSequence));
     return evals.find((e) => e.matched) ?? evals.reduce(closerOf);
   }
-  const tokens = tokenizeWithIdentifiers(phrase.toLowerCase());
+  const tokens = tokenizeWithIdentifiers(phrase).map(foldTerm);
   const meaningful = [
     ...new Set(tokens.filter((t) => isSignificantLength(t, MIN_TOKEN_LEN) && !PHRASE_STOPWORDS.has(t))),
   ];
@@ -234,7 +235,9 @@ export function collectReflexHits(
   context: string,
   budget: number,
 ): { pool: number; matched: ReflexMatch[]; served: ReflexMatch[]; nearMisses: ReflexNearMiss[] } {
-  const contextTokenList = tokenizeWithIdentifiers(context.toLowerCase());
+  // One spelling and case fold on both sides (lexical.ts): an NFD prompt from
+  // macOS, a Turkish "İ" or a niqqud-pointed Hebrew word meets its trigger.
+  const contextTokenList = tokenizeWithIdentifiers(context).map(foldTerm);
   const contextTokens = new Set(contextTokenList);
   // Tokenfolge für den wörtlichen Phrasen-Match (siehe phraseMatchesContext).
   const contextSequence = ` ${contextTokenList.join(" ")} `;

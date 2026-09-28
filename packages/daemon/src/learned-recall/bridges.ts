@@ -32,7 +32,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { capAtWordBoundary, hasWordForm, isSignificantLength, segmentWords } from "@bastra-recall/core";
+import { capAtWordBoundary, foldTerm, hasWordForm, isSignificantLength, segmentWords } from "@bastra-recall/core";
 import { bridgeLanguage, isBridgeLanguage } from "./language.js";
 
 export interface Bridge {
@@ -149,17 +149,13 @@ export function isMachineVocabulary(terms: string[]): boolean {
 const TERM_SPLIT_RE = /[^\p{L}\p{M}\p{N}]+/u;
 
 /**
- * Spellings of one word that must meet at mint and at query time (F09): NFC
- * (a decomposed "й" is и + U+0306), Turkish "İ" lowercasing to i + U+0307, and
- * the Cyrillic apostrophe (U+02BC or ASCII, "обʼєкт"/"об'єкт") that would
- * otherwise split a word into fragments under the length floor.
+ * Spellings of one word that must meet at mint and at query time (F09): the
+ * core fold (`foldTerm`: NFKC, Turkish İ/ı, ß, invisible characters, the
+ * in-word apostrophe of Cyrillic "обʼєкт"/"об'єкт"), plus the backtick and
+ * left quote Cyrillic keyboards also produce for that apostrophe.
  */
 function foldForTerms(text: string): string {
-  return text
-    .normalize("NFC")
-    .toLowerCase()
-    .replace(/i\u0307/g, "i")
-    .replace(/(?<=\p{Script=Cyrillic})['’ʼ‘`](?=\p{Script=Cyrillic})/gu, "");
+  return foldTerm(text.replace(/(?<=\p{Script=Cyrillic})[‘`](?=\p{Script=Cyrillic})/gu, ""));
 }
 
 export function distinctiveTerms(text: string): string[] {
@@ -178,7 +174,7 @@ export function distinctiveTerms(text: string): string[] {
 
 /** Stable id so the same bridge from two contributors dedupes to one file. */
 export function bridgeId(lang: string, trigger: string[], expansion: string[]): string {
-  const norm = (xs: string[]): string => [...new Set(xs.map((x) => x.toLowerCase()))].sort().join(" ");
+  const norm = (xs: string[]): string => [...new Set(xs.map(foldTerm))].sort().join(" ");
   return createHash("sha256").update(`${lang}\n${norm(trigger)}\n${norm(expansion)}`).digest("hex").slice(0, 16);
 }
 
@@ -208,7 +204,7 @@ export function mintBridge(
   if (trigger.length === 0) return null;
   const triggerSet = new Set(trigger);
   const expansion = memoryTerms
-    .map((t) => t.toLowerCase())
+    .map(foldTerm)
     .filter((t) => isSignificantLength(t, MIN_TERM_LEN) && !GENERIC_TERMS.has(t) && !triggerSet.has(t))
     .filter((t, i, a) => a.indexOf(t) === i)
     .slice(0, MAX_EXPANSION_TERMS);

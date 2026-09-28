@@ -27,7 +27,7 @@
  * summary" advisory, which needs the same primitive. Two competing similarity
  * measures inside one scoring function would be worse than either.
  */
-import { FUNCTION_WORDS, segmentWords } from "@bastra-recall/core";
+import { FUNCTION_WORDS, foldTerm, normalizeText, segmentWords } from "@bastra-recall/core";
 
 /** Case-folded tokens in ANY script — the Unicode class matters, an ASCII
  *  `\w` regex shreds exactly the tokens that carry the signal on a non-English
@@ -41,7 +41,10 @@ import { FUNCTION_WORDS, segmentWords } from "@bastra-recall/core";
  *  nobody can create a cycle through it. */
 
 export function tokens(text: string): string[] {
-  return (text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? []).flatMap(segmentWords);
+  // Marks stay inside their word (`\p{M}`: Devanagari vowel signs, Thai tone
+  // marks) — without them "हिन्दी" became ह/न/द. `normalizeText` + `foldTerm`
+  // are the spelling and case every other matcher compares (lexical.ts).
+  return (normalizeText(text).match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}_-]*/gu) ?? []).flatMap(segmentWords).map(foldTerm);
 }
 
 /**
