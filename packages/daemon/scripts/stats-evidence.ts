@@ -70,11 +70,16 @@ export function summarizeEvidenceGate(events: AnyEvent[], deps: EvidenceDeps): v
   const decisionsOf = (e: AnyEvent): Decision[] =>
     Array.isArray(e.decisions) ? (e.decisions as Decision[]) : [];
 
-  const shadowDecisions = shadow.flatMap(decisionsOf);
+  // §10.3/C-046 need the table to reflect what the gate actually decided —
+  // once the gate is ACTIVE that includes `live`, not just `shadow`. The
+  // canonical version (`src/telemetry-report.ts` `usableDecisions`) already
+  // sums shadow + live; this counts the same population so the two reports
+  // do not diverge.
+  const usableDecisions = usable.flatMap(decisionsOf);
   const days = new Set(shadow.map((e) => String(e.ts).slice(0, 10)));
 
   console.log(`\n## Evidence gate  (#264 — deterministic decision, §10.3)`);
-  console.log(`  shadow: ${shadow.length} call(s), ${shadowDecisions.length} decision(s) over ${days.size} calendar day(s)`);
+  console.log(`  shadow: ${shadow.length} call(s), ${shadow.flatMap(decisionsOf).length} decision(s) over ${days.size} calendar day(s)`);
   if (live.length > 0) {
     console.log(`  live:   ${live.length} call(s), ${live.flatMap(decisionsOf).length} decision(s)  — the gate is ACTIVE`);
   }
@@ -101,14 +106,14 @@ export function summarizeEvidenceGate(events: AnyEvent[], deps: EvidenceDeps): v
   }
 
   const byDecision = new Map<string, number>();
-  for (const d of shadowDecisions) byDecision.set(d.decision, (byDecision.get(d.decision) ?? 0) + 1);
-  const n = shadowDecisions.length;
+  for (const d of usableDecisions) byDecision.set(d.decision, (byDecision.get(d.decision) ?? 0) + 1);
+  const n = usableDecisions.length;
   console.log(`  decisions:`);
   for (const kind of ["required", "optional", "no_answer"]) {
     console.log(`    ${kind.padEnd(11)} ${(byDecision.get(kind) ?? 0).toString().padStart(5)}  (${pct(byDecision.get(kind) ?? 0, n)})`);
   }
   const reasons = new Map<string, number>();
-  for (const d of shadowDecisions) {
+  for (const d of usableDecisions) {
     if (d.abstain_reason) reasons.set(d.abstain_reason, (reasons.get(d.abstain_reason) ?? 0) + 1);
   }
   if (reasons.size > 0) {
@@ -118,7 +123,7 @@ export function summarizeEvidenceGate(events: AnyEvent[], deps: EvidenceDeps): v
   // §18.2/C-046: „der Report zeigt die Hop-Herkunft der required-Hits". Ein
   // `required` über einen Graph-Hop wäre ein Vertragsbruch — die Regel steht im
   // Prädikat, und diese Zeile ist ihre Kontrolle im Betrieb.
-  const requiredHits = shadowDecisions.filter((d) => d.decision === "required");
+  const requiredHits = usableDecisions.filter((d) => d.decision === "required");
   const byHop = new Map<string, number>();
   for (const d of requiredHits) byHop.set(d.hop ?? "(no hop recorded)", (byHop.get(d.hop ?? "(no hop recorded)") ?? 0) + 1);
   if (requiredHits.length > 0) {
@@ -132,7 +137,7 @@ export function summarizeEvidenceGate(events: AnyEvent[], deps: EvidenceDeps): v
     }
   }
 
-  summarizeGateDivergence(events, shadow, decisionsOf, deps);
+  summarizeGateDivergence(events, usable, decisionsOf, deps);
 }
 
 /**
