@@ -32,7 +32,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { capAtWordBoundary } from "@bastra-recall/core";
+import { capAtWordBoundary, hasWordForm, isSignificantLength, segmentWords } from "@bastra-recall/core";
 import { bridgeLanguage, isBridgeLanguage } from "./language.js";
 
 export interface Bridge {
@@ -142,8 +142,11 @@ const TERM_SPLIT_RE = /[^\p{L}\p{M}\p{N}]+/u;
 
 export function distinctiveTerms(text: string): string[] {
   const seen = new Set<string>();
-  for (const raw of text.toLowerCase().split(TERM_SPLIT_RE)) {
-    if (raw.length < MIN_TERM_LEN) continue;
+  // Runs in scripts written without spaces (Japanese, Chinese, Thai) are one
+  // sentence after the split — `segmentWords` cuts them into ICU words, whose
+  // two-character content words `isSignificantLength` keeps.
+  for (const raw of text.toLowerCase().split(TERM_SPLIT_RE).flatMap(segmentWords)) {
+    if (!isSignificantLength(raw, MIN_TERM_LEN)) continue;
     if (GENERIC_TERMS.has(raw)) continue;
     if (isEphemeralTerm(raw)) continue;
     seen.add(raw);
@@ -184,7 +187,7 @@ export function mintBridge(
   const triggerSet = new Set(trigger);
   const expansion = memoryTerms
     .map((t) => t.toLowerCase())
-    .filter((t) => t.length >= MIN_TERM_LEN && !GENERIC_TERMS.has(t) && !triggerSet.has(t))
+    .filter((t) => isSignificantLength(t, MIN_TERM_LEN) && !GENERIC_TERMS.has(t) && !triggerSet.has(t))
     .filter((t, i, a) => a.indexOf(t) === i)
     .slice(0, MAX_EXPANSION_TERMS);
   if (expansion.length === 0) return null;
@@ -239,11 +242,13 @@ const MAX_QUERY_EXPANSION = 12; // cap how much a single query can be widened
  *  „konventionen") dragged up to 12 foreign terms into unrelated prompts and
  *  pushed the memories the prompt was actually about out of the top-k. A
  *  one-term bridge still fires on its one term: it was minted that specific. */
-const MIN_TRIGGER_OVERLAP = 2;
+export const MIN_TRIGGER_OVERLAP = 2;
 const requiredOverlap = (b: Bridge): number => Math.min(MIN_TRIGGER_OVERLAP, b.trigger_terms.length);
-function triggerOverlap(b: Bridge, queryTerms: Set<string>): number {
+/** A case or verb ending is not a different term: a bridge minted on "арке"
+ *  fires on "арку" (core word-form rule, exact below 4 characters). */
+export function triggerOverlap(b: Pick<Bridge, "trigger_terms">, queryTerms: ReadonlySet<string>): number {
   let n = 0;
-  for (const t of b.trigger_terms) if (queryTerms.has(t)) n++;
+  for (const t of b.trigger_terms) if (hasWordForm(queryTerms, t)) n++;
   return n;
 }
 

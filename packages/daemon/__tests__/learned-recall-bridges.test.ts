@@ -194,6 +194,15 @@ test("BridgePool.load partitions by language and only matching-language bridges 
   });
 });
 
+// Revert-check: back to `queryTerms.has(t)` in triggerOverlap → red.
+test("BridgePool fires an undetermined-language bridge on an inflected query", async () => {
+  const ru = bridge({ lang: "und", trigger_terms: ["арка", "ревью"], expansion_terms: ["overlay-sync", "turn-order"] });
+  await withPool([ru], async (pool) => {
+    assert.ok(pool.expansionsFor("что по арке после ревью?").includes("overlay-sync"), "'арке' is a form of 'арка'");
+    assert.deepEqual(pool.expansionsFor("что по арке?"), [], "one of two trigger terms is still not enough");
+  });
+});
+
 test("BridgePool ignores corrupt and unknown-language files", async () => {
   const root = await mkdtemp(join(tmpdir(), "bastra-bridges-"));
   try {

@@ -18,7 +18,16 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { bridgeLanguage } from "./language.js";
-import { isExpiredUnconfirmed, isMachineVocabulary, mintBridge, UNCONFIRMED_BRIDGE_TTL_DAYS, type Bridge } from "./bridges.js";
+import {
+  bridgeId,
+  isExpiredUnconfirmed,
+  isMachineVocabulary,
+  mintBridge,
+  MIN_TRIGGER_OVERLAP,
+  triggerOverlap,
+  UNCONFIRMED_BRIDGE_TTL_DAYS,
+  type Bridge,
+} from "./bridges.js";
 import { rerank, type ChatFn, type RerankCandidate } from "./reranker.js";
 import { testRunLogDir } from "../env.js";
 
@@ -223,8 +232,16 @@ export interface HarvestResult {
  * occasion, see occasionOf — a repeat inside one session is not a confirmation).
  */
 export function harvestBridges(reaches: Reach[], getMemoryTerms: (memoryId: string) => string[], date?: string): HarvestResult {
-  const byId = new Map<string, Bridge>();
-  const occasions = new Map<string, Set<string>>();
+  // Two questions, answered separately. WHICH reaches are the same bridge:
+  // a second reach of the SAME memory whose query shares at least
+  // MIN_TRIGGER_OVERLAP trigger terms with the bridge — the very rule
+  // `expansionsFor` fires on. Counting only byte-identical trigger sets (the
+  // id) made evidence 2 unreachable for real prompts, which almost never
+  // repeat all eight terms: on a live vault 130 reaches minted 20+ bridges per
+  // boot and wrote none. WHAT confirms it (#129): a distinct occasion — the
+  // same question re-asked inside one session is one confirmation, not two.
+  const byMemory = new Map<string, Bridge[]>();
+  const occasions = new Map<Bridge, Set<string>>();
   for (const r of reaches) {
     const terms = getMemoryTerms(r.memoryId);
     if (terms.length === 0) continue;
@@ -233,14 +250,39 @@ export function harvestBridges(reaches: Reach[], getMemoryTerms: (memoryId: stri
     // #672: first_seen = the earliest reach behind the bridge (ISO strings of
     // the same format compare chronologically).
     const reachTs = r.ts !== undefined && Number.isFinite(Date.parse(r.ts)) ? new Date(r.ts).toISOString() : undefined;
-    const seen = occasions.get(b.id) ?? new Set<string>();
-    seen.add(r.occasion ?? occasionOf({ ts: r.ts }) ?? UNKNOWN_OCCASION);
-    occasions.set(b.id, seen);
-    const existing = byId.get(b.id);
+    const occasion = r.occasion ?? occasionOf({ ts: r.ts }) ?? UNKNOWN_OCCASION;
+    const group = byMemory.get(r.memoryId) ?? [];
+    const queryTerms = new Set(b.trigger_terms);
+    const existing = group.find(
+      (e) =>
+        e.id === b.id ||
+        (e.lang === b.lang && triggerOverlap(e, queryTerms) >= Math.min(MIN_TRIGGER_OVERLAP, e.trigger_terms.length, b.trigger_terms.length)),
+    );
     if (existing) {
+      const seen = occasions.get(existing)!;
+      seen.add(occasion);
       existing.evidence = seen.size;
       if (reachTs && (!existing.first_seen || reachTs < existing.first_seen)) existing.first_seen = reachTs;
-    } else byId.set(b.id, reachTs ? { ...b, first_seen: reachTs } : b);
+    } else {
+      const minted = reachTs ? { ...b, first_seen: reachTs } : b;
+      occasions.set(minted, new Set([occasion]));
+      group.push(minted);
+      byMemory.set(r.memoryId, group);
+    }
+  }
+  // Two memories reached by the same query mint the same id only when their
+  // expansions coincide too — merge those as before, one confirmation per
+  // occasion across both.
+  const byId = new Map<string, Bridge>();
+  for (const b of [...byMemory.values()].flat()) {
+    const id = bridgeId(b.lang, b.trigger_terms, b.expansion_terms);
+    const existing = byId.get(id);
+    if (existing) {
+      const seen = occasions.get(existing)!;
+      for (const o of occasions.get(b)!) seen.add(o);
+      existing.evidence = seen.size;
+      if (b.first_seen && (!existing.first_seen || b.first_seen < existing.first_seen)) existing.first_seen = b.first_seen;
+    } else byId.set(id, b);
   }
   return { bridges: [...byId.values()], reaches: reaches.length, minted: byId.size };
 }

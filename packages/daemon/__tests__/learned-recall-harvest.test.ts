@@ -195,3 +195,46 @@ test("#704 mintBridge: zzallirog's machine trigger does not mint; machine terms 
   assert.ok(!b.trigger_terms.includes("claude"), "a machine term never becomes a trigger");
   assert.ok(b.trigger_terms.includes("panel"));
 });
+
+// Evidence per memory, by the firing rule. Revert-check: go back to counting
+// only identical bridge ids in harvestBridges → the two "counts" tests are red.
+// The reaches sit on two days: one occasion is one confirmation (#129).
+test("harvestBridges counts a second reach of the same memory that shares two trigger terms", () => {
+  const reaches = [
+    { query: "почему арка ревью опять разъехалась с леджером", memoryId: "arc", ts: "2026-09-20T10:00:00.000Z" },
+    { query: "леджер арки снова не совпал после ревью", memoryId: "arc", ts: "2026-09-21T10:00:00.000Z" },
+  ];
+  const { bridges } = harvestBridges(reaches, () => ["overlay-sync", "turn-order", "chat-relay"]);
+  assert.equal(bridges.length, 1, "one memory, overlapping queries: one bridge");
+  assert.equal(bridges[0].evidence, 2, "the second reach confirms it — 'арки'/'арка', 'леджер'/'леджером' are word forms");
+});
+
+test("harvestBridges counts overlapping Japanese queries as a repeat", () => {
+  const reaches = [
+    { query: "ゲームモードを切り替えるとゲームが落ちる", memoryId: "gm", ts: "2026-09-20T10:00:00.000Z" },
+    { query: "ゲーム中にモードを変えたら落ちた", memoryId: "gm", ts: "2026-09-21T10:00:00.000Z" },
+  ];
+  const { bridges } = harvestBridges(reaches, () => ["cgroup", "scx-scheduler", "restart"]);
+  assert.equal(bridges.length, 1);
+  assert.equal(bridges[0].evidence, 2);
+});
+
+test("harvestBridges keeps a one-term coincidence and a different memory apart", () => {
+  const oneTerm = harvestBridges(
+    [
+      { query: "почему арка ревью разъехалась", memoryId: "arc" },
+      { query: "арка поверхности команды где лежит", memoryId: "arc" },
+    ],
+    () => ["overlay-sync", "turn-order"],
+  );
+  assert.equal(oneTerm.bridges.length, 2, "one shared term is not a repeat");
+  assert.ok(oneTerm.bridges.every((b) => b.evidence === 1));
+  const twoMemories = harvestBridges(
+    [
+      { query: "почему арка ревью разъехалась", memoryId: "arc" },
+      { query: "почему арка ревью разъехалась", memoryId: "other" },
+    ],
+    (id) => (id === "arc" ? ["overlay-sync"] : ["game-mode"]),
+  );
+  assert.ok(twoMemories.bridges.every((b) => b.evidence === 1), "another memory is another bridge");
+});

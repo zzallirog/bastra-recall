@@ -64,7 +64,10 @@ function memory(id: string, title: string, summary: string): string {
   ].join("\n");
 }
 
-/** Two far queries in different folds that share their words. */
+/** Two far queries in different folds that share their words. Both reach the
+ *  same memory with overlapping triggers, so the harvest counts them as ONE
+ *  bridge confirmed on two occasions (sessions s1, s2) — the firing rule
+ *  decides what a repeat is, not byte-identical trigger sets. */
 function twoQueries(): [string, string] {
   const qs: string[] = [];
   for (let i = 0; qs.length < 2 && i < 500; i++) {
@@ -131,7 +134,7 @@ test("verify reports the held-out check and stages nothing", async () => {
     assert.equal(rc, 0, out);
     assert.match(out, /held-out check \(#129\)/);
     assert.match(out, /far-out-of-pool: 2 case\(s\), bridges fired on 2/);
-    assert.match(out, /2 of 2 local bridge\(s\) pass the #129 gate/);
+    assert.match(out, /1 of 1 local bridge\(s\) pass the #129 gate/);
     assert.deepEqual(await staged(bridgesRoot), []);
   });
 });
@@ -141,7 +144,7 @@ test("contribute stages exactly the bridges that pass, scrubbed and signed", asy
     const { rc, out } = await run("contribute");
     assert.equal(rc, 0, out);
     const files = await staged(bridgesRoot);
-    assert.equal(files.length, 2, out);
+    assert.equal(files.length, 1, out);
     for (const b of files) {
       assert.equal(typeof b.verifier, "string", "a staged bridge carries the pseudonymous verifier");
       assert.equal(b.first_seen, undefined, "local bookkeeping stays home");
@@ -159,7 +162,7 @@ test("a demoted bridge stays home even with a positive held-out lift", async () 
     await writeFile(path, JSON.stringify({ ...b, demoted_at: "2026-09-25T00:00:00.000Z" }));
     const { out } = await run("contribute");
     assert.match(out, /demoted/);
-    assert.equal((await staged(bridgesRoot)).length, 1);
+    assert.equal((await staged(bridgesRoot)).length, 0);
   });
 });
 
