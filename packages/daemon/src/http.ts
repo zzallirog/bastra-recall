@@ -85,6 +85,7 @@ import { dispatchLocalRoutes } from "./http-local-routes.js";
 import { dispatchApiSurface } from "./http-api-surface.js";
 import { createHttpServerContext } from "./http-context.js";
 import { listenHttp } from "./http-listen.js";
+import { setCommonTermSource } from "./common-terms.js";
 
 // File-size split: the auth/CORS policy, the hook handlers, the /api/v1
 // dispatcher and the shared helpers moved into http-auth.ts,
@@ -195,6 +196,8 @@ export async function probeDaemonPort(port: number): Promise<"free" | "in-use"> 
 export async function startHttpServer(opts: HttpOptions): Promise<HttpHandle> {
   const { port, vault, telemetry, toolDeps, documentWriteEnabled, onActivity } = opts;
   const { search } = toolDeps;
+  // The vault this server serves decides which words are filler (common-terms.ts).
+  setCommonTermSource((t) => search.isCommonTerm(t));
   // Boot wiring — token, CORS allowlist, host list, live updates, vault and
   // telemetry bindings, /health payload. Resolved once, before the first
   // request (http-context.ts).

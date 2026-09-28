@@ -325,10 +325,14 @@ test("a single hyphenated identifier does not satisfy the two-term rule by itsel
  */
 test("two common filler words from the same phrase are not a declaration", async (t) => {
   const entries = [
-    // "aber" und "auch" stehen in der geteilten Stoppwortliste (stopwords.ts)
-    // — Funktionswörter ohne eigenes Trigger-Signal.
+    // "aber" und "auch" füllen die Bodies dieses Vaults (≥ 20 %, common-terms.ts)
+    // — Funktionswörter ohne eigenes Trigger-Signal, ohne Stoppwortliste.
     { id: "target", recall_when: ["aber auch heute"] },
-    ...Array.from({ length: 30 }, (_, i) => ({ id: `n-${i}`, recall_when: [`sonstwort ${i}`] })),
+    ...Array.from({ length: 30 }, (_, i) => ({
+      id: `n-${i}`,
+      recall_when: [`sonstwort ${i}`],
+      body: `Das war aber auch Notiz ${i}.`,
+    })),
   ];
   const { dir, search } = await vaultWith(entries);
   t.after(async () => {

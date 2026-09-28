@@ -17,17 +17,27 @@ export {
   capAtWordBoundary,
   QUERY_MAX_CHARS,
 } from "./query-normalize.js";
-export { PHRASE_STOPWORDS, MIN_SIGNIFICANT_TOKEN_LEN, FUNCTION_WORDS, ALTERNATIVE_WORDS } from "./stopwords.js";
+export { MIN_SIGNIFICANT_TOKEN_LEN, ALTERNATIVE_WORDS } from "./stopwords.js";
+export {
+  commonTermsIn,
+  isCommonShare,
+  NO_COMMON_TERMS,
+  COMMON_TERM_MIN_DOCS,
+  COMMON_TERM_MIN_SHARE,
+  type CommonTermTest,
+} from "./common-terms.js";
 export {
   segmentWords,
   hasSpacelessScript,
   isSignificantLength,
+  isShortWord,
   letterCount,
   normalizeText,
   foldTerm,
   sameWordForm,
   hasWordForm,
   WORD_FORM_MIN_LEN,
+  SHORT_WORD_MAX_LETTERS,
 } from "./lexical.js";
 export {
   capBm25Query,

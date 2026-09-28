@@ -53,15 +53,11 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/daemon/src/learned-recall/language.ts :: latin [^a-zäöüß]": "#707 filing-folder detection only (a non-Latin query abstains → und)",
 
   // ── #707: per-language data with a documented neutral path — allowed shape ──
-  "packages/core/src/stopwords.ts :: name PHRASE_STOPWORDS": "#707 union of the per-language data below; an unlisted language drops no word (neutral)",
-  "packages/core/src/stopwords.ts :: name PHRASE_STOPWORDS_BY_LANGUAGE": "#707 per-language data; neutral path documented and tested (ru/tr/el)",
-  "packages/core/src/stopwords.ts :: keyed PHRASE_STOPWORDS_BY_LANGUAGE": "#707 per-language data with a neutral path",
   "packages/daemon/src/prompt-classify.ts :: name TRIVIAL_ACKS": "#707 union of per-language data; an unlisted ack runs one score-gated recall (neutral)",
   "packages/daemon/src/prompt-classify.ts :: keyed TRIVIAL_ACKS_BY_LANGUAGE": "#707 per-language data; structural no-letter/≤2-char rule covers every script",
   "packages/daemon/src/lexicon.ts :: name DEFAULT_DECISION_CUES_BY_LANGUAGE": "#707 per-language data; stop-lane-choice.ts option pick is the neutral fallback",
   "packages/daemon/src/lexicon.ts :: keyed DEFAULT_DECISION_CUES_BY_LANGUAGE": "#707 per-language data with a neutral fallback (option pick)",
   "packages/daemon/src/lexicon.ts :: name DEFAULT_DECISION_CUES": "#707 flattened decision cues, neutral fallback exists",
-  "packages/core/src/stopwords.ts :: keyed FUNCTION_WORDS_BY_LANGUAGE": "#707 per-language data for similarity/todo/acted-on; an unlisted language drops no word (neutral, tested with ru)",
   "packages/core/src/stopwords.ts :: keyed ALTERNATIVE_WORDS_BY_LANGUAGE": "#707 per-language data; a free-standing / or | splits alternatives in any script (tested with el)",
   "packages/daemon/src/todo-lane.ts :: keyed TODO_VERBS_BY_LANGUAGE": "#707 per-language data; an unlisted language keeps every content word as a topic (tested with ru)",
   "packages/daemon/src/lexicon.ts :: name DEFAULT_NEGATIVE_CLAIM_CUES_BY_LANGUAGE": "#707 per-language data, user-extensible; an unlisted language gets no advisory penalty",

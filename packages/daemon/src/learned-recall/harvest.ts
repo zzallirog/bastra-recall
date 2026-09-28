@@ -18,8 +18,10 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { bridgeLanguage } from "./language.js";
+import { isCommonTerm } from "../common-terms.js";
 import {
   bridgeId,
+  commonTermsOfTexts,
   isExpiredUnconfirmed,
   isMachineVocabulary,
   mintBridge,
@@ -242,10 +244,14 @@ export function harvestBridges(reaches: Reach[], getMemoryTerms: (memoryId: stri
   // same question re-asked inside one session is one confirmation, not two.
   const byMemory = new Map<string, Bridge[]>();
   const occasions = new Map<Bridge, Set<string>>();
+  // The user's own queries say which of their words are filler (a fifth of
+  // them), in whatever language they write — no politeness list (common-terms).
+  const queryCommon = commonTermsOfTexts(reaches.map((r) => r.query));
+  const isCommon = (t: string): boolean => isCommonTerm(t) || queryCommon(t);
   for (const r of reaches) {
     const terms = getMemoryTerms(r.memoryId);
     if (terms.length === 0) continue;
-    const b = mintBridge(r.query, terms, bridgeLanguage(r.query), date);
+    const b = mintBridge(r.query, terms, bridgeLanguage(r.query), date, isCommon);
     if (!b) continue;
     // #672: first_seen = the earliest reach behind the bridge (ISO strings of
     // the same format compare chronologically).
@@ -438,6 +444,8 @@ export async function harvestFarBridges(
   const byId = new Map<string, Bridge>();
   const occasions = new Map<string, Set<string>>();
   let judged = 0;
+  const queryCommon = commonTermsOfTexts(pools.map((p) => p.query));
+  const isCommon = (t: string): boolean => isCommonTerm(t) || queryCommon(t);
   for (const entry of pools) {
     if (judged >= maxJudge) break;
     // Zweiter Gegenreview: `maxScore` ist ein absoluter Schnitt auf der
@@ -463,7 +471,7 @@ export async function harvestFarBridges(
     if (!bestId || chosenRank === null || chosenRank <= 1) continue; // none, or top already → no rescue
     const info = getMemoryInfo(bestId);
     if (!info) continue;
-    const b = mintBridge(entry.query, info.terms, lang, opts.date);
+    const b = mintBridge(entry.query, info.terms, lang, opts.date, isCommon);
     if (!b) continue;
     // #129: one confirmation per occasion, as in harvestBridges.
     const seen = occasions.get(b.id) ?? new Set<string>();

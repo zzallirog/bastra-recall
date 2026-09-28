@@ -30,6 +30,7 @@ import {
   type SimilarityFields,
 } from "./save-similarity.js";
 import type { ToolDeps } from "./tool-deps.js";
+import { isCommonTerm } from "./common-terms.js";
 
 /** #239: upper bound for the collision scan. The pool decides `k`, but a
  *  pathological scope must not turn an advisory into a full-index sweep on
@@ -71,42 +72,19 @@ export interface SaveQualityResult {
   }>;
 }
 
-export const GENERIC_TRIGGER_WORDS = new Set([
-  "api",
-  "app",
-  "auth",
-  "bug",
-  "code",
-  "css",
-  "data",
-  "db",
-  "debug",
-  "design",
-  "docs",
-  "error",
-  "fix",
-  "frontend",
-  "ios",
-  "js",
-  "macos",
-  "memory",
-  "node",
-  "python",
-  "react",
-  "refactor",
-  "server",
-  "swift",
-  "test",
-  "typescript",
-  "ui",
-  "ux",
-]);
+/** A word is generic when this vault uses it everywhere: in a fifth of its
+ *  memories (core common-terms.ts). The English list of technology words it
+ *  replaces ("api", "bug", "server") never knew "Fehler", "ошибка" or "修复",
+ *  and a word the list named ("python") is specific in a vault about cooking. */
+function isGenericWord(token: string): boolean {
+  return isCommonTerm(token);
+}
 
 function triggerSpecificityIssue(trigger: string): string | undefined {
   const tokens = words(trigger);
   if (tokens.length <= 1) return `recall_when '${trigger}' is too short/generic`;
-  if (tokens.length <= 2 && tokens.every((t) => GENERIC_TRIGGER_WORDS.has(t))) {
-    return `recall_when '${trigger}' is only generic technology words`;
+  if (tokens.length <= 2 && tokens.every(isGenericWord)) {
+    return `recall_when '${trigger}' is only words this vault uses everywhere`;
   }
   return undefined;
 }
@@ -114,7 +92,7 @@ function triggerSpecificityIssue(trigger: string): string | undefined {
 function buildSpecificTriggerSuggestion(input: SaveMemoryInput): string {
   const path = input.topic_path.join("/") || input.scope;
   const summaryTokens = words(input.summary)
-    .filter((t) => !GENERIC_TRIGGER_WORDS.has(t))
+    .filter((t) => !isGenericWord(t))
     .slice(0, 5)
     .join(" ");
   const anchor = summaryTokens || input.title.toLowerCase();
@@ -199,7 +177,7 @@ export function scoreSaveQuality(
 
   const genericTags = input.tags.filter((tag) => {
     const tokens = words(tag);
-    return tokens.length === 1 && GENERIC_TRIGGER_WORDS.has(tokens[0]);
+    return tokens.length === 1 && isGenericWord(tokens[0]);
   });
   if (genericTags.length > 0) {
     issues.push(`generic tags: ${genericTags.join(", ")}`);

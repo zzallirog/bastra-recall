@@ -17,6 +17,7 @@ import {
   DUPLICATE_SIMILARITY_MIN,
   type SimilarityFields,
 } from "../src/save-similarity.js";
+import { setCommonTermSource } from "../src/common-terms.js";
 
 const mem = (f: Partial<SimilarityFields>): SimilarityFields => ({
   title: "",
@@ -95,11 +96,19 @@ test("diacritics survive — a German pair is not reduced to fragments", () => {
   assert.equal(fieldSimilarity(c, d), 0, "no shared content word → 0, not a stopword-driven partial");
 });
 
-test("stopwords alone never produce similarity", () => {
-  const a = mem({ title: "Das ist eine Lösung für den Daemon", summary: "und das wird dann so sein" });
-  const b = mem({ title: "Das ist eine Frage an die Kamera", summary: "und das wird dann so sein" });
-  const sim = fieldSimilarity(a, b);
-  assert.ok(sim < DUPLICATE_SIMILARITY_MIN, `function words must not carry the score, got ${sim.toFixed(3)}`);
+test("the vault's filler words alone never produce similarity", () => {
+  // Filler is what fills a fifth of the vault's bodies (common-terms.ts) —
+  // here the German function words a German vault is full of, no list.
+  const filler = new Set(["das", "ist", "eine", "für", "den", "und", "wird", "dann", "sein", "die"]);
+  setCommonTermSource((t) => filler.has(t));
+  try {
+    const a = mem({ title: "Das ist eine Lösung für den Daemon", summary: "und das wird dann so sein" });
+    const b = mem({ title: "Das ist eine Frage an die Kamera", summary: "und das wird dann so sein" });
+    const sim = fieldSimilarity(a, b);
+    assert.ok(sim < DUPLICATE_SIMILARITY_MIN, `function words must not carry the score, got ${sim.toFixed(3)}`);
+  } finally {
+    setCommonTermSource(null);
+  }
 });
 
 test("a shared word counts by its WEAKER role — trigger on one side, prose on the other is weak evidence", () => {

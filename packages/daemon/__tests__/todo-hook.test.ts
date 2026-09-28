@@ -20,6 +20,7 @@ import {
   runTodoLane,
   type RecallHit,
 } from "../src/todo-lane.js";
+import { setCommonTermSource } from "../src/common-terms.js";
 
 // ─── Pure unit tests ─────────────────────────────────────────────────────
 
@@ -55,14 +56,20 @@ test("extractTopicsFromTodos — handles missing/empty payload", () => {
   assert.equal(onlyEmptyContent.topics.length, 0);
 });
 
-test("extractTopicsFromTodos — filters stopwords and short words", () => {
+test("extractTopicsFromTodos — filters short words and the vault's filler", () => {
   const todos = [
     { content: "fix the and or but if then for to of in" },
     { content: "fix the and or but if then for to of in" },
   ];
-  const ex = extractTopicsFromTodos(todos);
-  // "fix" is stopword too; everything else is < 3 chars or stopword.
-  assert.equal(ex.topics.length, 0);
+  // Short words (≤ 3 letters) are never topics; "then" is filler because the
+  // vault's bodies are full of it (common-terms.ts), not because a list says so.
+  setCommonTermSource((t) => t === "then");
+  try {
+    assert.equal(extractTopicsFromTodos(todos).topics.length, 0);
+  } finally {
+    setCommonTermSource(null);
+  }
+  assert.deepEqual(extractTopicsFromTodos(todos).topics, ["then"], "a vault too small to say keeps it (neutral path)");
 });
 
 test("isLowConfidence — triggers when no topics and short query", () => {

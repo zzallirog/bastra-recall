@@ -169,6 +169,21 @@ export function isSignificantLength(token: string, minLen: number): boolean {
   return letterCount(token) >= minLen;
 }
 
+/**
+ * Is `token` one of the short words every language fills its sentences with
+ * (articles, prepositions, particles, "the", "für", "для", "cha", "של")?
+ * Zipf's law of abbreviation: the most frequent words of a language are its
+ * shortest, in every language — so length, not a list, marks them. Up to
+ * {@link SHORT_WORD_MAX_LETTERS} letters in an alphabetic script, one
+ * character in a spaceless one. Callers treat such a token as optional next
+ * to longer content words, never as absent: "git push" still needs "git".
+ */
+export const SHORT_WORD_MAX_LETTERS = 3;
+export function isShortWord(token: string): boolean {
+  if (hasSpacelessScript(token)) return [...token].length <= 1;
+  return letterCount(token) <= SHORT_WORD_MAX_LETTERS;
+}
+
 const LETTERS_ONLY_RE = /^[\p{L}\p{M}]+$/u;
 /** Below this many letters two different tokens are never one word. */
 export const WORD_FORM_MIN_LEN = 4;

@@ -15,7 +15,8 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import type { Vault } from "@bastra-recall/core";
-import { distinctiveTerms, isExpiredUnconfirmed, MIN_BRIDGE_EVIDENCE } from "./bridges.js";
+import { commonTermsOfTexts, distinctiveTerms, isExpiredUnconfirmed, MIN_BRIDGE_EVIDENCE } from "./bridges.js";
+import { isCommonTerm } from "../common-terms.js";
 import {
   readEventLog,
   reconstructReaches,
@@ -59,12 +60,16 @@ export const LAST_MINT_FILE = "last-mint.json";
 
 /** A memory's distinctive vocabulary — the near terms mintBridge tests against. */
 export function memoryTermsGetter(vault: Vault): (id: string) => string[] {
+  const text = (m: { fm: { title: string; summary: string; recall_when: string[]; tags: string[] }; body: string }): string =>
+    [m.fm.title, m.fm.summary, ...m.fm.recall_when, ...m.fm.tags, m.body].join(" ");
+  // The vault's own filler (a fifth of its memories) — also when no server
+  // registered its index, as in a CLI mint run.
+  const vaultCommon = commonTermsOfTexts(vault.list().map(text));
+  const isCommon = (t: string): boolean => isCommonTerm(t) || vaultCommon(t);
   return (id: string): string[] => {
     const m = vault.get(id);
     if (!m) return [];
-    return distinctiveTerms(
-      [m.fm.title, m.fm.summary, ...m.fm.recall_when, ...m.fm.tags, m.body].join(" "),
-    );
+    return distinctiveTerms(text(m), isCommon);
   };
 }
 

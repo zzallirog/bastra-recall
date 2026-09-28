@@ -4,8 +4,8 @@ import type { EmbeddingIndex } from "./embeddings.js";
 import { fuseRRF, RRF_SCALE } from "./embeddings.js";
 import type { RecallStage, StageListener } from "./recall-stages.js";
 import { normalizeQuery, tokenizeWithIdentifiers } from "./query-normalize.js";
-import { foldTerm } from "./lexical.js";
-import { PHRASE_STOPWORDS, MIN_SIGNIFICANT_TOKEN_LEN } from "./stopwords.js";
+import { foldTerm, isSignificantLength } from "./lexical.js";
+import { MIN_SIGNIFICANT_TOKEN_LEN } from "./stopwords.js";
 import { DocFreqMiniSearch } from "./doc-freq-index.js";
 import { rareTermFuzzy } from "./bm25-expansion.js";
 import { groupQueryTerms, groupedTokenize } from "./bm25-grouping.js";
@@ -189,6 +189,7 @@ function anchorStrength(
   queryTerms: ReadonlySet<string>,
   recallWhenDocFreq: (term: string) => number,
   phrasesOf: (id: string) => string[],
+  isCommonTerm: (term: string) => boolean = () => false,
 ): "strong" | "weak" | undefined {
   const match = r.match;
   if (!match || queryTerms.size === 0) return undefined;
@@ -249,7 +250,7 @@ function anchorStrength(
       if (!word) continue;
       const emitted = tokenizeWithIdentifiers(word).map(foldTerm);
       if (emitted.length === 0) continue;
-      const hits = emitted.filter((t) => matchedTriggerTerms.has(t) && isSignificantTriggerTerm(t));
+      const hits = emitted.filter((t) => matchedTriggerTerms.has(t) && isSignificantTriggerTerm(t, isCommonTerm));
       if (hits.length === 0) continue;
       const origin = emitted.join("\0");
       const existing = originTerms.get(origin);
@@ -279,14 +280,16 @@ function anchorStrength(
 const ANCHOR_RARE_DF_MAX = 5;
 
 /**
- * Ist `term` (roh, in Original-Schreibweise) selbst signifikant genug, um zur
- * Zweierregel beizutragen? Filtert Funktionswörter (geteilte Liste mit dem
- * Reflex-Pfad, #360) und Kurzwörter unter der Signifikanz-Mindestlänge —
- * zwei x-beliebige Allerweltswörter derselben Phrase sind keine Absicht,
- * auch wenn beide exakt in der Query stehen.
+ * Ist `term` selbst signifikant genug, um zur Zweierregel beizutragen?
+ * Filtert Kurzwörter unter der Signifikanz-Mindestlänge (in Buchstaben, zwei
+ * Zeichen in Schriften ohne Leerzeichen) und die Funktionswörter DIESES Vaults
+ * (common-terms.ts: in ≥ 20 % der Dokumente) — zwei x-beliebige
+ * Allerweltswörter derselben Phrase sind keine Absicht, auch wenn beide exakt
+ * in der Query stehen. Früher eine en/de-Stoppwortliste (#360): jede andere
+ * Sprache zählte ihre Funktionswörter mit.
  */
-function isSignificantTriggerTerm(term: string): boolean {
-  return term.length >= MIN_SIGNIFICANT_TOKEN_LEN && !PHRASE_STOPWORDS.has(term);
+function isSignificantTriggerTerm(term: string, isCommonTerm: (term: string) => boolean): boolean {
+  return isSignificantLength(term, MIN_SIGNIFICANT_TOKEN_LEN) && !isCommonTerm(term);
 }
 
 /**
@@ -555,6 +558,16 @@ export class SearchIndex {
     return this.recallWhenTermFreq.get(foldTerm(term)) ?? 0;
   }
 
+  /**
+   * Is `term` a function word of this vault — in the body of at least a fifth
+   * of its memories (common-terms.ts)? The language-neutral replacement for the
+   * per-language stopword lists: "the", "und", "для", "için" are common in
+   * the vault of whoever writes in that language, and nowhere else.
+   */
+  isCommonTerm(term: string): boolean {
+    return this.mini.isCommonTerm(term);
+  }
+
   // Query-Cache (#30): MiniSearch tokenisiert die Query bei jedem
   // `recall()` neu. Hooks rufen häufig mit identischer Query auf
   // (detectTopics() ist deterministisch). LRU via Map-insertion-order,
@@ -817,8 +830,12 @@ export class SearchIndex {
       matched_terms: r.terms ?? [],
       matched_recall_when: matchedRecallWhen(r, queryTerms),
       ...(() => {
-        const a = anchorStrength(r, queryTerms, (t) => this.recallWhenDocFreq(t), (id) =>
-          this.vault.get(id)?.fm.recall_when ?? [],
+        const a = anchorStrength(
+          r,
+          queryTerms,
+          (t) => this.recallWhenDocFreq(t),
+          (id) => this.vault.get(id)?.fm.recall_when ?? [],
+          (t) => this.isCommonTerm(t),
         );
         return a ? { anchor_strength: a } : {};
       })(),
@@ -1211,8 +1228,12 @@ export class SearchIndex {
         matched_recall_when: bm ? matchedRecallWhen(bm, authoredTerms) : false,
         ...(() => {
           const a = bm
-            ? anchorStrength(bm, authoredTerms, (t) => this.recallWhenDocFreq(t), (id) =>
-                this.vault.get(id)?.fm.recall_when ?? [],
+            ? anchorStrength(
+                bm,
+                authoredTerms,
+                (t) => this.recallWhenDocFreq(t),
+                (id) => this.vault.get(id)?.fm.recall_when ?? [],
+                (t) => this.isCommonTerm(t),
               )
             : undefined;
           return a ? { anchor_strength: a } : {};

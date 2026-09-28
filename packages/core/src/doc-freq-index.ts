@@ -15,6 +15,7 @@
  */
 import MiniSearch from "minisearch";
 import { foldTerm } from "./lexical.js";
+import { isCommonShare } from "./common-terms.js";
 
 export class DocFreqMiniSearch<T = unknown> extends MiniSearch<T> {
   /**
@@ -40,5 +41,18 @@ export class DocFreqMiniSearch<T = unknown> extends MiniSearch<T> {
     let total = 0;
     for (const docs of perField.values()) total += docs.size;
     return total;
+  }
+
+  /**
+   * Is `term` a function word of this vault (common-terms.ts)? Counted in the
+   * running text of `field` (the memory body) only: function words fill prose,
+   * while a word that recurs in titles, tags or triggers is a topic the vault
+   * is about — two such trigger words together still declare intent (#360).
+   */
+  isCommonTerm(term: string, field = "body"): boolean {
+    const fieldId = this._fieldIds[field];
+    if (fieldId === undefined) return false;
+    const docs = this._index.get(foldTerm(term))?.get(fieldId);
+    return docs !== undefined && isCommonShare(docs.size, this.documentCount);
   }
 }

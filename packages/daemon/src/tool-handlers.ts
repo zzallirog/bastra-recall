@@ -22,7 +22,6 @@ import {
   assertBodyTail,
   BodySentinelError,
   stripAutoRelatedSection,
-  FUNCTION_WORDS,
   isSignificantLength,
 } from "@bastra-recall/core";
 import { fireAndForget } from "./telemetry.js";
@@ -36,7 +35,8 @@ import { tokens as words } from "./save-similarity.js";
 import type { ToolDeps } from "./tool-deps.js";
 import { hiddenFromCaller, hiddenOnDisk, type PrivateAccess } from "./private-access.js";
 import { vaultLocator } from "./vault-locator.js";
-import { scoreSaveQuality, GENERIC_TRIGGER_WORDS, type SaveQualityResult } from "./save-quality.js";
+import { scoreSaveQuality, type SaveQualityResult } from "./save-quality.js";
+import { isCommonTerm } from "./common-terms.js";
 import { MEMORY_TOOL_DEFS } from "./tool-defs-memory.js";
 import {
   callCorruptionMessage,
@@ -322,19 +322,17 @@ export interface SaveMemoryResult {
 // ("тон письма outward") tokenised to just its one Latin word and tripped the
 // `tokens.length <= 1` "too short/generic" penalty — every Cyrillic/CJK author
 // was structurally penalised on save_quality. `\p{L}\p{N}` + the `u` flag count
-// letters in any script; toLowerCase already folds Unicode case.
+// letters in any script; `foldTerm` folds case the same way on every host.
 
 
-// #707: function words are per-language data (`FUNCTION_WORDS`,
-// core/stopwords.ts) instead of an English-only list here. A language without
-// a list drops no word — its function words then count toward the overlap.
 export function distinctiveTokensForActedOn(text: string): string[] {
   return Array.from(
     new Set(
       words(text)
         .filter((token) => isSignificantLength(token, 4))
-        .filter((token) => !FUNCTION_WORDS.has(token))
-        .filter((token) => !GENERIC_TRIGGER_WORDS.has(token)),
+        // The vault's filler words (core common-terms.ts) — "that", "with",
+        // "werden", "которые", "için" alike — not an English stopword list.
+        .filter((token) => !isCommonTerm(token)),
     ),
   ).slice(0, 200);
 }

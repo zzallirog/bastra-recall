@@ -32,7 +32,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { capAtWordBoundary, foldTerm, hasWordForm, isSignificantLength, segmentWords } from "@bastra-recall/core";
+import { capAtWordBoundary, commonTermsIn, foldTerm, hasWordForm, isSignificantLength, segmentWords, type CommonTermTest } from "@bastra-recall/core";
+import { isCommonTerm } from "../common-terms.js";
 import { bridgeLanguage, isBridgeLanguage } from "./language.js";
 
 export interface Bridge {
@@ -67,46 +68,17 @@ export interface Bridge {
   date?: string;
 }
 
-// A distinctive term: ≥4 chars, not a stopword-ish filler, deduped. Mirrors the
-// spirit of tool-handlers' distinctiveTokensForActedOn, kept independent to avoid
-// a circular import. The point is to drop noise words so triggers/expansions are
+// A distinctive term: ≥4 letters, not filler, deduped. Mirrors the spirit of
+// tool-handlers' distinctiveTokensForActedOn, kept independent to avoid a
+// circular import. The point is to drop noise words so triggers/expansions are
 // specific enough to be useful and safe-ish to share.
+//
+// Filler is found by frequency, not by a list (core common-terms.ts): a term
+// in a fifth of the vault's memories, or — at mint time — of the user's own
+// logged queries, is how THIS user fills a sentence, in whatever language.
+// The en/de/ru list it replaces ("bitte", "please", "пожалуйста", …) left
+// every other language's politeness and filler to become bridge triggers.
 const MIN_TERM_LEN = 4;
-const GENERIC_TERMS = new Set([
-  "this", "that", "with", "from", "have", "should", "would", "could", "your",
-  "what", "when", "where", "which", "about", "into", "code", "file", "files",
-  "eine", "einen", "einem", "einer", "dann", "noch", "auch", "sehr", "wenn",
-  "wieder", "schon", "nicht", "machen", "soll", "sollte", "werden", "diese",
-  "dieser", "dieses", "beim", "dass", "weil",
-  // 20.08.: Alltagswörter, die der In-band-Mint als Trigger geprägt hatte —
-  // „bitte" allein zog bei jedem höflichen Prompt zehn Fremdterme nach. Ein
-  // Trigger muss ein Thema benennen, nicht eine Satzform.
-  "bitte", "habe", "haben", "hast", "hatte", "kann", "kannst", "können", "muss",
-  "müssen", "will", "willst", "möchte", "gerne", "jetzt", "erstmal", "nochmal",
-  "einmal", "heute", "morgen", "gestern", "hier", "dort", "mehr", "alles",
-  "alle", "allem", "etwas", "nichts", "immer", "stand", "steht", "liegt",
-  "gibt", "kurz", "kurze", "neue", "neuen", "neues", "neuer", "fertig",
-  "aktuell", "aktuelle", "aktueller", "aktuellen", "geschrieben", "gemacht",
-  "schauen", "schau", "bauen", "baue", "prüfen", "prüfe", "nutzen", "nutze",
-  "danke", "hallo", "okay", "genau", "passt", "sonst", "oder", "aber", "doch",
-  "also", "dafür", "damit", "darauf", "davon", "dazu", "denn", "ohne", "über",
-  "unter", "nach", "dein", "deine", "deinen", "mein", "meine", "meinen",
-  "sind", "wird", "wurde", "waren", "gewesen", "worden",
-  "please", "just", "need", "needs", "want", "wants", "make", "makes", "like",
-  "more", "some", "then", "there", "here", "will", "been", "were", "they",
-  "them", "than", "only", "very", "really", "thing", "things", "something",
-  "going", "know", "think", "sure", "done", "right", "still", "again",
-  "today", "first", "next", "last", "take", "look", "check", "help", "each",
-  "every", "much", "many", "most", "such", "same",
-  // ru (F09): the same filler the de/en lists drop — a trigger names a topic,
-  // not a sentence shape.
-  "пожалуйста", "сейчас", "сделай", "сделать", "можно", "нужно", "надо", "давай",
-  "только", "теперь", "потом", "когда", "чтобы", "который", "которая", "которые",
-  "этого", "этому", "этой", "этот", "эти", "такой", "очень", "просто", "снова",
-  "опять", "тоже", "также", "если", "есть", "было", "будет", "хочу", "хотим",
-  "смотри", "посмотри", "проверь", "привет", "спасибо", "ладно", "окей", "всего",
-  "здесь", "сегодня", "вчера", "завтра", "ещё", "еще",
-]);
 
 /** Extract deduped distinctive terms from a free-text string. */
 /** Quality track (#353 addendum): ephemeral tokens — raw tool-call ids,
@@ -158,18 +130,31 @@ function foldForTerms(text: string): string {
   return foldTerm(text.replace(/(?<=\p{Script=Cyrillic})[‘`](?=\p{Script=Cyrillic})/gu, ""));
 }
 
-export function distinctiveTerms(text: string): string[] {
+export function distinctiveTerms(text: string, isCommon: CommonTermTest = isCommonTerm): string[] {
   const seen = new Set<string>();
   // Runs in scripts written without spaces (Japanese, Chinese, Thai) are one
   // sentence after the split — `segmentWords` cuts them into ICU words, whose
   // two-character content words `isSignificantLength` keeps.
   for (const raw of foldForTerms(text).split(TERM_SPLIT_RE).flatMap(segmentWords)) {
     if (!isSignificantLength(raw, MIN_TERM_LEN)) continue;
-    if (GENERIC_TERMS.has(raw)) continue;
+    if (isCommon(raw)) continue;
     if (isEphemeralTerm(raw)) continue;
     seen.add(raw);
   }
   return [...seen];
+}
+
+/**
+ * The filler of a corpus in any language (core common-terms.ts): the terms
+ * that turn up in a fifth of `texts` — the vault's memories, or the queries a
+ * mint run reads. Below 30 texts nothing is filler.
+ */
+export function commonTermsOfTexts(texts: Iterable<string>): CommonTermTest {
+  const docs: string[][] = [];
+  for (const t of texts) {
+    docs.push(foldForTerms(t).split(TERM_SPLIT_RE).flatMap(segmentWords).filter((w) => isSignificantLength(w, MIN_TERM_LEN)));
+  }
+  return commonTermsIn(docs);
 }
 
 /** Stable id so the same bridge from two contributors dedupes to one file. */
@@ -195,8 +180,9 @@ export function mintBridge(
   memoryTerms: string[],
   lang: string = bridgeLanguage(query),
   date?: string,
+  isCommon: CommonTermTest = isCommonTerm,
 ): Bridge | null {
-  const queryTerms = distinctiveTerms(query);
+  const queryTerms = distinctiveTerms(query, isCommon);
   // #704: a query made mostly of harness vocabulary is machine text, whoever
   // logged it; the rest keeps its topic words and loses the machine ones.
   if (isMachineVocabulary(queryTerms)) return null;
@@ -205,7 +191,7 @@ export function mintBridge(
   const triggerSet = new Set(trigger);
   const expansion = memoryTerms
     .map(foldTerm)
-    .filter((t) => isSignificantLength(t, MIN_TERM_LEN) && !GENERIC_TERMS.has(t) && !triggerSet.has(t))
+    .filter((t) => isSignificantLength(t, MIN_TERM_LEN) && !isCommon(t) && !triggerSet.has(t))
     .filter((t, i, a) => a.indexOf(t) === i)
     .slice(0, MAX_EXPANSION_TERMS);
   if (expansion.length === 0) return null;

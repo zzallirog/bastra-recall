@@ -8,7 +8,7 @@
  * verdrahtet (Promotion nur nach Bestätigung, siehe curator-run.ts).
  *
  * „Hart" heißt deterministisch, ohne Score: eine Phrase matcht, wenn alle
- * ihre Tokens (≥3 Zeichen, lowercase, tokenizeWithIdentifiers) im Kontext
+ * ihre Tokens (≥3 Buchstaben, gefaltet, tokenizeWithIdentifiers) im Kontext
  * vorkommen — mindestens 2 Tokens, oder genau 1 Identifier-Token exakt;
  * eine mehrwortige Phrase, von der nur ein Inhaltstoken übrig bleibt
  * („antwortentwurf bitte"), matcht wörtlich als Tokenfolge (20.08.);
@@ -30,10 +30,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   tokenizeWithIdentifiers,
   foldTerm,
-  PHRASE_STOPWORDS,
   MIN_SIGNIFICANT_TOKEN_LEN,
   ALTERNATIVE_WORDS,
   hasWordForm,
+  isShortWord,
   isSignificantLength,
 } from "@bastra-recall/core";
 import type { Vault, Memory } from "@bastra-recall/core";
@@ -41,10 +41,11 @@ import { envFirst, envInt } from "./env.js";
 import { readSettings } from "./settings.js";
 import { fireAndForget, type Telemetry } from "./telemetry.js";
 import { truncateSummary } from "./tool-handlers.js";
+import { isCommonTerm } from "./common-terms.js";
 
-// #360: nach core verschoben (PHRASE_STOPWORDS/MIN_SIGNIFICANT_TOKEN_LEN) —
-// `anchorStrength` in search.ts braucht denselben Begriff von "Allerweltswort"
-// für die Zweierregel. Ein Alias hier, damit der lokale Name unverändert bleibt.
+// #360: nach core verschoben (MIN_SIGNIFICANT_TOKEN_LEN) — `anchorStrength` in
+// search.ts braucht denselben Begriff von "Inhaltswort" für die Zweierregel.
+// Ein Alias hier, damit der lokale Name unverändert bleibt.
 const MIN_TOKEN_LEN = MIN_SIGNIFICANT_TOKEN_LEN;
 const DEFAULT_MAX_PER_TURN = 2;
 
@@ -71,7 +72,8 @@ export interface ReflexHit {
 const IDENTIFIER_TOKEN_RE = /[-_./#+@:]|\d/;
 
 /** Hartes Phrase-gegen-Kontext-Matching (deterministisch, kein Score):
- *  ALLE Inhaltstokens der Phrase (≥3 Zeichen, ohne Funktionswörter) müssen
+ *  ALLE Inhaltstokens der Phrase (≥3 Buchstaben, ohne die Füllwörter des
+ *  Vaults; kurze Wörter optional neben zwei längeren) müssen
  *  im Kontext vorkommen — mindestens 2 Tokens, oder genau 1 Identifier-Token
  *  exakt. Kein Prefix, kein Fuzzy. */
 export function phraseMatchesContext(
@@ -117,10 +119,15 @@ function evaluatePhrase(
     return evals.find((e) => e.matched) ?? evals.reduce(closerOf);
   }
   const tokens = tokenizeWithIdentifiers(phrase).map(foldTerm);
-  const meaningful = [
-    ...new Set(tokens.filter((t) => isSignificantLength(t, MIN_TOKEN_LEN) && !PHRASE_STOPWORDS.has(t))),
-  ];
-  if (meaningful.length === 0) return NO_CONTENT;
+  // Function words without a word list (core common-terms.ts): a word in a
+  // fifth of the vault is this user's filler, in whatever language they write
+  // — dropped, as the en/de stopword list used to drop "bitte" or "the". A
+  // short word ("für", "для", "cha", "של") is optional next to two longer
+  // content words and required otherwise ("git push" still needs "git").
+  const content = [...new Set(tokens.filter((t) => isSignificantLength(t, MIN_TOKEN_LEN) && !isCommonTerm(t)))];
+  if (content.length === 0) return NO_CONTENT;
+  const long = content.filter((t) => !isShortWord(t));
+  const meaningful = long.length >= 2 ? long : content;
   if (meaningful.length === 1 && !IDENTIFIER_TOKEN_RE.test(meaningful[0])) {
     // 20.08.-Vorfall: „antwortentwurf bitte" — vom User wörtlich als Trigger
     // eingetragen, „bitte" ist Funktionswort, übrig blieb EIN Inhaltstoken,

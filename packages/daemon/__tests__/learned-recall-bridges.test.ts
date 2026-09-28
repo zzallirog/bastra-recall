@@ -15,6 +15,7 @@ import {
   MIN_BRIDGE_EVIDENCE,
   UNCONFIRMED_BRIDGE_TTL_DAYS,
   bridgeId,
+  commonTermsOfTexts,
   distinctiveTerms,
   expandQuery,
   isEphemeralTerm,
@@ -51,13 +52,13 @@ function bridge(partial: Partial<Bridge> & Pick<Bridge, "lang" | "trigger_terms"
   };
 }
 
-test("distinctiveTerms drops short + generic words, dedupes", () => {
-  const terms = distinctiveTerms("the panel panel resignKey with observer");
+test("distinctiveTerms drops short words and the corpus's filler, dedupes", () => {
+  const terms = distinctiveTerms("the panel panel resignKey with observer", (t) => t === "with");
   assert.ok(terms.includes("panel"));
   assert.ok(terms.includes("resignkey"));
   assert.ok(terms.includes("observer"));
   assert.ok(!terms.includes("the"), "short word dropped");
-  assert.ok(!terms.includes("with"), "generic word dropped");
+  assert.ok(!terms.includes("with"), "filler of the corpus dropped");
   assert.equal(terms.filter((t) => t === "panel").length, 1, "deduped");
 });
 
@@ -402,6 +403,17 @@ test("expansionsFor needs two shared trigger terms; a one-term bridge fires on i
 });
 
 test("distinctiveTerms drops everyday words so they can never become trigger terms (20.08.)", () => {
-  const terms = distinctiveTerms("antwortentwurf bitte, ich habe den aktuellen stand kurz geprüft");
+  // The user's own queries say which words are filler — no politeness list.
+  const topics = Array.from({ length: 30 }, (_, i) => `thema${String.fromCharCode(97 + (i % 26))}${i}`);
+  const deQueries = topics.map((t) => `bitte, ich habe den aktuellen stand kurz zu ${t} notiert`);
+  const terms = distinctiveTerms("antwortentwurf bitte, ich habe den aktuellen stand kurz geprüft", commonTermsOfTexts(deQueries));
   assert.deepEqual(terms, ["antwortentwurf", "geprüft"]);
+  // The same rule in a language no list ever named.
+  const ruQueries = topics.map((t) => `пожалуйста посмотри сейчас ${t}`);
+  assert.deepEqual(
+    distinctiveTerms("пожалуйста посмотри сейчас деплой staging", commonTermsOfTexts(ruQueries)),
+    ["деплой", "staging"],
+  );
+  // Too few texts to tell: nothing is filler, every term stays.
+  assert.ok(distinctiveTerms("bitte antwortentwurf", commonTermsOfTexts(deQueries.slice(0, 5))).includes("bitte"));
 });

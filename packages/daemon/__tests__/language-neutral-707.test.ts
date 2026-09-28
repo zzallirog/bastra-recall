@@ -2,9 +2,9 @@
  * #707 — the fixed-language places the #679 guard found, each checked with a
  * non-Latin language:
  *
- *   save-similarity  function words are shared per-language data; an unlisted
- *                    language drops no word (neutral), duplicates still score
- *   todo-lane        the tokenizer keeps every script; task verbs are data
+ *   save-similarity  function words are the vault's filler (common-terms.ts),
+ *                    not a list; duplicates still score in any language
+ *   todo-lane        the tokenizer keeps every script; no task-verb list
  *   tool-handlers    acted-on tokens keep non-Latin words
  *   taxonomy         a convention title in Cyrillic covers its cluster
  *   reflex           alternatives split by per-language data (`или`) and by a
@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Vault, SearchIndex, tokenizeWithIdentifiers } from "@bastra-recall/core";
 import { Telemetry } from "../src/telemetry.js";
+import { setCommonTermSource } from "../src/common-terms.js";
 import { fieldSimilarity, DUPLICATE_SIMILARITY_MIN, contentTokens } from "../src/save-similarity.js";
 import { extractTopicsFromTodos } from "../src/todo-lane.js";
 import { distinctiveTokensForActedOn } from "../src/tool-handlers.js";
@@ -59,8 +60,20 @@ test("#707 similarity: two unrelated Russian notes stay apart although they shar
   assert.ok(fieldSimilarity(a, b) < DUPLICATE_SIMILARITY_MIN, `got ${fieldSimilarity(a, b)}`);
 });
 
-test("#707 similarity: listed function words are still dropped, content words of any script kept", () => {
-  assert.deepEqual([...contentTokens("the server and the сервер")], ["server", "сервер"]);
+/** Stand-in for a vault in which `words` fill a fifth of the memories. */
+function withFiller(words: string[], fn: () => void): void {
+  setCommonTermSource((t) => words.includes(t));
+  try {
+    fn();
+  } finally {
+    setCommonTermSource(null);
+  }
+}
+
+test("#707 similarity: the vault's filler words are dropped, content words of any script kept", () => {
+  withFiller(["the", "and"], () => {
+    assert.deepEqual([...contentTokens("the server and the сервер")], ["server", "сервер"]);
+  });
 });
 
 // ── todo-lane ────────────────────────────────────────────────────────
@@ -73,19 +86,23 @@ test("#707 todo-lane: a Cyrillic todo list yields Cyrillic topics (tokenizer kee
   assert.deepEqual(out.topics, ["сервера"]);
 });
 
-test("#707 todo-lane: task verbs are data — 'add'/'neue' never become topics", () => {
-  const out = extractTopicsFromTodos([{ content: "add neue Migration" }, { content: "add neue Migration tests" }]);
-  assert.deepEqual(out.topics, ["migration"]);
+test("#707 todo-lane: no task-verb list — a short word and the vault's filler never become topics", () => {
+  withFiller(["neue"], () => {
+    const out = extractTopicsFromTodos([{ content: "add neue Migration" }, { content: "add neue Migration tests" }]);
+    assert.deepEqual(out.topics, ["migration"]);
+  });
 });
 
 // ── tool-handlers (acted-on overlap) ─────────────────────────────────
 
-test("#707 acted-on: Greek content words are kept, listed function words dropped", () => {
-  assert.deepEqual(distinctiveTokensForActedOn("which zebra επανεκκίνηση διακομιστή"), [
-    "zebra",
-    "επανεκκίνηση",
-    "διακομιστή",
-  ]);
+test("#707 acted-on: Greek content words are kept, the vault's filler dropped", () => {
+  withFiller(["which"], () => {
+    assert.deepEqual(distinctiveTokensForActedOn("which zebra επανεκκίνηση διακομιστή"), [
+      "zebra",
+      "επανεκκίνηση",
+      "διακομιστή",
+    ]);
+  });
 });
 
 // ── taxonomy ─────────────────────────────────────────────────────────

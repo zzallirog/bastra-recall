@@ -34,7 +34,7 @@ import {
 } from "../settings.js";
 import { envFirst } from "../env.js";
 import { commonsPath, COMMONS_REPO_URL, verifierId } from "./commons.js";
-import { BridgePool, distinctiveTerms, isConfirmedBridge, MIN_BRIDGE_EVIDENCE, scrubBridge, type Bridge } from "../learned-recall/bridges.js";
+import { BridgePool, isConfirmedBridge, MIN_BRIDGE_EVIDENCE, scrubBridge, type Bridge } from "../learned-recall/bridges.js";
 import {
   readEventLog,
   writeBridges,
@@ -240,13 +240,11 @@ export async function cmdBridges(opts: { sub: string | null; positional?: string
       }
       const vault = new Vault(vaultPath);
       await vault.init();
+      const memoryTerms = memoryTermsGetter(vault);
       const getMemoryInfo = (id: string): { text: string; terms: string[] } | null => {
         const m = vault.get(id);
         if (!m) return null;
-        return {
-          text: `${m.fm.title} — ${m.fm.summary}`,
-          terms: distinctiveTerms([m.fm.title, m.fm.summary, ...m.fm.recall_when, ...m.fm.tags, m.body].join(" ")),
-        };
+        return { text: `${m.fm.title} — ${m.fm.summary}`, terms: memoryTerms(id) };
       };
       // Probe what Ollama actually has before firing 50 chat calls: on a machine that
       // never pulled the default model, /api/chat 404s and the run dies at case 1/50

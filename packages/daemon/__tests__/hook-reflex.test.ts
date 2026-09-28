@@ -13,6 +13,19 @@ import { join } from "node:path";
 import { request } from "node:http";
 import { Vault, SearchIndex, TriggerExpander, buildInflectPrompt, tokenizeWithIdentifiers } from "@bastra-recall/core";
 import { phraseMatchesContext, collectReflexHits } from "../src/reflex.js";
+import { setCommonTermSource } from "../src/common-terms.js";
+
+/** A vault whose bodies are full of these words (core common-terms.ts) — the
+ *  filler the en/de stopword list used to name. Reset after `fn`. */
+async function withVaultFiller<T>(words: string[], fn: () => T | Promise<T>): Promise<T> {
+  const filler = new Set(words);
+  setCommonTermSource((t) => filler.has(t));
+  try {
+    return await fn();
+  } finally {
+    setCommonTermSource(null);
+  }
+}
 import { startHttpServer } from "../src/http.js";
 import { Telemetry } from "../src/telemetry.js";
 
@@ -288,11 +301,10 @@ test("collectReflexHits: recall_when_expanded counts — inflection survives via
   await vault.init();
   try {
     // Der Prompt trifft keine Original-Phrase (Flexion: „entwirfst" statt
-    // „entwerfen"), aber eine expandierte Variante.
-    const { matched, served } = collectReflexHits(
-      vault,
-      "bitte den entwurf der antwort an zzalli erstellen",
-      2,
+    // „entwerfen"), aber eine expandierte Variante. „einer" ist ein Füllwort
+    // dieses Vaults (common-terms.ts), kein Inhaltswort der Phrase.
+    const { matched, served } = await withVaultFiller(["einer"], () =>
+      collectReflexHits(vault, "bitte den entwurf der antwort an zzalli erstellen", 2),
     );
     assert.equal(matched.length, 1, "the expanded variant fires");
     assert.equal(served[0].memory.fm.id, "konvention");
@@ -303,18 +315,22 @@ test("collectReflexHits: recall_when_expanded counts — inflection survives via
   }
 });
 
-test("phraseMatchesContext: a user-authored phrase that collapses to one content token matches literally (20.08. incident)", () => {
+test("phraseMatchesContext: a user-authored phrase that collapses to one content token matches literally (20.08. incident)", async () => {
+  await withVaultFiller(["bitte"], () => literalPhraseChecks());
+});
+
+function literalPhraseChecks(): void {
   const prompt = "antwortentwurf bitte. ich freue mich das komplett zu testen sobald ich die freie zeit finde#";
   const tokens = tokenizeWithIdentifiers(prompt.toLowerCase());
   const context = new Set(tokens);
   const sequence = ` ${tokens.join(" ")} `;
-  // „bitte" is a stopword: the phrase used to collapse to one token and be dropped silently.
+  // „bitte" is filler in this vault: the phrase used to collapse to one token and be dropped silently.
   assert.equal(phraseMatchesContext("antwortentwurf bitte", context, sequence), true, "the literal phrase fires");
   assert.equal(phraseMatchesContext("antwortentwurf bitte", context), false, "without a sequence the old rule holds");
   assert.equal(phraseMatchesContext("antwortentwurf", context, sequence), false, "a bare single word stays a scatter trigger");
   assert.equal(phraseMatchesContext("bitte antwortentwurf", context, sequence), false, "literal means literal — token order counts");
   assert.equal(phraseMatchesContext("deployment", ctx("das deployment läuft"), " das deployment läuft "), false);
-});
+}
 
 test("collectReflexHits: the literal-phrase fallback reaches the served list end to end (20.08.)", async () => {
   const dir = await mkdtemp(join(tmpdir(), "bastra-reflex-literal-"));
@@ -391,7 +407,9 @@ test("#565 near miss: the single-token guard says it was the guard, not a missin
   try {
     // 20.08.-Klasse: das einzige Inhaltstoken STEHT im Prompt, nur nicht als
     // wörtliche Tokenfolge — die Streutrigger-Regel verwirft, bisher stumm.
-    const { matched, nearMisses } = collectReflexHits(vault, "der antwortentwurf liegt im ordner", 2);
+    const { matched, nearMisses } = await withVaultFiller(["bitte"], () =>
+      collectReflexHits(vault, "der antwortentwurf liegt im ordner", 2),
+    );
     assert.equal(matched.length, 0, "precondition: nothing fired");
     const miss = nearMisses.find((n) => n.id === "literal");
     assert.ok(miss);

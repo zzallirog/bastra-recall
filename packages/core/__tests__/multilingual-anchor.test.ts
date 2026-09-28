@@ -1,8 +1,9 @@
 /**
  * #707: `anchorStrength`'s significance rule does not depend on a language
- * list. PHRASE_STOPWORDS knows de and en; for every other language no word is
- * dropped as a function word (the neutral path), so two exact trigger terms
- * make a strong anchor in Russian, Turkish and Greek exactly as in German.
+ * list. A function word is one that fills this vault's bodies (common-terms.ts)
+ * — in any language; a vault too small to say keeps every word (the neutral
+ * path), so two exact trigger terms make a strong anchor in Russian, Turkish
+ * and Greek exactly as in German.
  *
  * Runner: node --import tsx --test packages/core/__tests__/multilingual-anchor.test.ts
  */
@@ -13,9 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Vault } from "../src/vault.js";
 import { SearchIndex } from "../src/search.js";
-import { PHRASE_STOPWORDS, PHRASE_STOPWORDS_BY_LANGUAGE } from "../src/stopwords.js";
-
-async function vaultWith(entries: { id: string; recall_when: string[] }[]) {
+async function vaultWith(entries: { id: string; recall_when: string[]; body?: string }[]) {
   const dir = await mkdtemp(path.join(tmpdir(), "bastra-ml-anchor-"));
   for (const e of entries) {
     await writeFile(
@@ -33,7 +32,7 @@ created: 2020-01-01
 updated: 2026-07-01
 ---
 
-body of ${e.id}
+${e.body ?? `body of ${e.id}`}
 `,
       "utf8",
     );
@@ -45,9 +44,23 @@ body of ${e.id}
   return { dir, search };
 }
 
-test("the stopword set is the union of the per-language data", () => {
-  const union = new Set(Object.values(PHRASE_STOPWORDS_BY_LANGUAGE).flat());
-  assert.deepEqual([...PHRASE_STOPWORDS].sort(), [...union].sort());
+test("the vault's own filler words are not a declaration, whatever the language", async (t) => {
+  const { dir, search } = await vaultWith([
+    { id: "target", recall_when: ["это было давно"] },
+    ...Array.from({ length: 30 }, (_, i) => ({
+      id: `n-${i}`,
+      recall_when: [`заметка ${i}`],
+      body: `Это было в понедельник, запись ${i}.`,
+    })),
+  ]);
+  t.after(async () => {
+    search.stop();
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
+  const hit = search.recall("это было", { k: 40 }).find((h) => h.id === "target");
+  assert.ok(hit, "precondition: the memory must be retrieved");
+  assert.equal(hit.matched_recall_when, true);
+  assert.equal(hit.anchor_strength, "weak", "two words that fill every body do not declare intent");
 });
 
 for (const [lang, phrase, query] of [

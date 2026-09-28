@@ -17,8 +17,9 @@
  */
 // #305: subpath leafs, never the core barrel — measured +40ms of process
 // start against +0.8ms for the three leafs, on a fresh spawn per event.
+import { foldTerm, isShortWord, isSignificantLength, letterCount, segmentWords } from "@bastra-recall/core";
+import { isCommonTerm } from "./common-terms.js";
 import { RRF_K, RRF_SCALE } from "@bastra-recall/core/rrf";
-import { FUNCTION_WORDS, foldTerm, isSignificantLength, segmentWords } from "@bastra-recall/core";
 import { requiredHeadline, unfusedHeadline, unfusedReasonFor } from "./band-wording.js";
 import { applyLaneScopeFilter, projectConfidence, projectForFilter, projectForLane, type ScopeFilterMode } from "./scope-filter.js";
 import { HINT_FRAME_NOTE, stripFenceMarkers } from "@bastra-recall/core/scrub";
@@ -97,18 +98,6 @@ interface RecallResponse {
   degraded?: string;
 }
 
-// Noise tokens that would otherwise dominate the topic-frequency map ("add",
-// "fix", "the", "und"…). #707: per-language DATA, not a fixed DE/EN list —
-// function words come from the shared `FUNCTION_WORDS` (core/stopwords.ts),
-// and the task verbs every todo starts with are listed here by language. A
-// language without a list drops no word: its function words may then show up
-// among the topics, but its content words are never lost.
-const TODO_VERBS_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  en: ["add", "fix", "update", "make", "do", "use", "run", "set", "get", "new", "via", "out", "up", "down"],
-  de: ["neu", "neue"],
-};
-const TODO_NOISE: ReadonlySet<string> = new Set([...FUNCTION_WORDS, ...Object.values(TODO_VERBS_BY_LANGUAGE).flat()]);
-
 export interface TopicExtraction {
   query: string;
   topics: string[];
@@ -118,8 +107,8 @@ export interface TopicExtraction {
 /**
  * Pull a topic-rich query out of a TodoWrite payload. Strategy:
  * 1. Use the first 1–2 `content` strings verbatim as the spine of the query.
- * 2. Tokenize ALL todo contents to letter/digit words of any script
- *    (length >= 3, no function words or task verbs).
+ * 2. Tokenize ALL todo contents to words of any script (≥ 4 letters, not the
+ *    vault's filler — core common-terms.ts, no stopword list).
  * 3. Pick the top words that appear in >= 2 todos as `topics`.
  * 4. Final query = "<topics joined>  <first 2 todos joined>".
  */
@@ -142,13 +131,14 @@ export function extractTopicsFromTodos(todosRaw: unknown): TopicExtraction {
   // so a single chatty todo can't dominate the topic list.
   const perTodoWords: Set<string>[] = contents.map((c) => {
     // Letters of any script (F19); spaceless scripts are segmented into words.
-    // #707: letters of every script — `[a-z0-9äöüß]` dropped Cyrillic,
-    // Greek, CJK … entirely, so a non-Latin todo list had no topics.
     const words = foldTerm(c)
       .replace(/[^\p{L}\p{M}\p{N}\s-]/gu, " ")
       .split(/\s+/)
       .flatMap((t) => segmentWords(t))
-      .filter((w) => isSignificantLength(w, 3) && !TODO_NOISE.has(w));
+      // A topic is a keyword: not a short word (the frequent words of every
+      // language are its short ones — "the", "für", "для") and not the
+      // vault's filler (core common-terms.ts). No stopword list.
+      .filter((w) => isSignificantLength(w, 3) && !isShortWord(w) && !isCommonTerm(w));
     return new Set(words);
   });
 
@@ -167,7 +157,10 @@ export function extractTopicsFromTodos(todosRaw: unknown): TopicExtraction {
   const minDocFreq = contents.length === 1 ? 1 : 2;
   const topics = [...docFreq.entries()]
     .filter(([, count]) => count >= minDocFreq)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    // Ties: the longer word first (more specific in any language — the short
+    // ones are the frequent ones), then code-point order, the same on every
+    // host (localeCompare followed the machine's collation).
+    .sort((a, b) => b[1] - a[1] || letterCount(b[0]) - letterCount(a[0]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
     .slice(0, TOPIC_WORD_CAP)
     .map(([w]) => w);
 

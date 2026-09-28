@@ -366,7 +366,8 @@ test("#698: an ExitPlanMode plan produces hints and a todo_hook_call row", async
       assert.equal(ev.status, "ok");
       // One item per plan line; the code fence body is not a plan step.
       assert.equal(ev.todo_count, 7);
-      assert.match(String(ev.topic), /web/);
+      // Topics are keywords of four letters and up ("web" is short, like "the").
+      assert.match(String(ev.topic), /workspace/);
     });
   });
 });

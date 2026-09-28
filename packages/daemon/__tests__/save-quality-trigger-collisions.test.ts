@@ -26,6 +26,7 @@ import { Vault, SearchIndex } from "@bastra-recall/core";
 import { Telemetry } from "../src/telemetry.js";
 import { scoreSaveQuality } from "../src/save-quality.js";
 import type { ToolDeps } from "../src/tool-deps.js";
+import { setCommonTermSource } from "../src/common-terms.js";
 
 const SCOPE = "collision-300";
 
@@ -257,15 +258,19 @@ test("#325: ä and ae are the same trigger — the spelling is not the situation
   );
 });
 
-test("#325: folding does not smuggle German function words past the stopword list", async (t) => {
+test("#325: folding does not smuggle German function words past the filler check", async (t) => {
   // The trap this fix could have introduced: fold "für" to "fuer" and the
-  // stopword lookup misses it, so a function word starts carrying signal and
-  // any two German notes begin to look alike — the failure STOPWORDS exists to
-  // prevent. A trigger of nothing but function words has no content at all and
-  // can never claim a situation.
+  // filler lookup misses it, so a function word starts carrying signal and
+  // any two German notes begin to look alike. Filler is the vault's own
+  // (common-terms.ts: a fifth of its bodies), checked before the umlaut fold.
+  // A trigger of nothing but function words has no content at all and can
+  // never claim a situation.
   const { deps, close } = await makeVault([
     ["twin", "Ablage für den Watcher.", ["für den Watcher und über die Ablage"]],
   ]);
+  const filler = new Set(["für", "über", "den", "und", "die"]);
+  setCommonTermSource((w) => filler.has(w));
+  t.after(() => setCommonTermSource(null));
   t.after(close);
 
   const quality = scoreSaveQuality(deps, saveInput(["für über"]), "vault-path-watcher-decision");

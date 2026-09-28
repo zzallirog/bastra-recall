@@ -27,7 +27,9 @@
  * summary" advisory, which needs the same primitive. Two competing similarity
  * measures inside one scoring function would be worse than either.
  */
-import { FUNCTION_WORDS, foldTerm, normalizeText, segmentWords } from "@bastra-recall/core";
+
+import { foldTerm, letterCount, normalizeText, segmentWords } from "@bastra-recall/core";
+import { isCommonTerm } from "./common-terms.js";
 
 /** Case-folded tokens in ANY script — the Unicode class matters, an ASCII
  *  `\w` regex shreds exactly the tokens that carry the signal on a non-English
@@ -84,25 +86,17 @@ export function foldUmlauts(token: string): string {
 }
 
 /** A token reduced to its comparable form, or null when it carries no signal.
- *  The stopword list is folded too — otherwise "für" survives as "fuer", is no
- *  longer recognised as a function word, and starts making any two German
- *  notes look similar, which is the failure mode STOPWORDS exists to prevent. */
+ *  Function words carry no topical signal — leaving them in makes any two
+ *  notes in one language look similar, the reported failure mode. They are
+ *  found without a list (core common-terms.ts): a word in a fifth of the
+ *  vault's memories is filler in whatever language the vault is written. The
+ *  en/de/ru list this replaces left every other language's "için", "dla",
+ *  "của" in as content. Length alone would not do here: Vietnamese content
+ *  syllables are as short as its function words. */
 function contentToken(raw: string): string | null {
-  const token = foldUmlauts(raw);
-  if (token.length < MIN_TOKEN_LENGTH || FOLDED_FUNCTION_WORDS.has(token)) return null;
-  return token;
+  if (letterCount(raw) < MIN_TOKEN_LENGTH || isCommonTerm(raw)) return null;
+  return foldUmlauts(raw);
 }
-
-/** Function words carry no topical signal, so leaving them in would make any
- *  two German notes look similar — which is the reported failure mode.
- *
- *  #707: the words are per-language DATA in `core/src/stopwords.ts`
- *  (`FUNCTION_WORDS_BY_LANGUAGE`), shared with the todo lane and the acted-on
- *  overlap. A language without a list drops no word: its function words then
- *  count as content, which lowers every score a little but never switches
- *  the measure off for that language. Folded here through `foldUmlauts`, so
- *  "für" and "über" still match after folding. */
-const FOLDED_FUNCTION_WORDS = new Set([...FUNCTION_WORDS].map(foldUmlauts));
 
 /** A single character carries no topical signal and inflates the union. */
 const MIN_TOKEN_LENGTH = 2;
