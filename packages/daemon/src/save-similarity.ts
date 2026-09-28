@@ -27,18 +27,21 @@
  * summary" advisory, which needs the same primitive. Two competing similarity
  * measures inside one scoring function would be worse than either.
  */
-import { FUNCTION_WORDS } from "@bastra-recall/core";
+import { FUNCTION_WORDS, segmentWords } from "@bastra-recall/core";
 
 /** Case-folded tokens in ANY script — the Unicode class matters, an ASCII
  *  `\w` regex shreds exactly the tokens that carry the signal on a non-English
  *  vault (`Lösung → sung`, `Größe → gr, e`).
  *
  *  Exported as the single tokenizer for the save path: `save-quality.ts` and
- *  the acted-on token derivation in `tool-handlers.ts` both use it, so a
- *  tokenizer fix lands in one place. This module is a leaf (no daemon
- *  imports, only the core package), so nobody can create a cycle through it. */
+ *  the acted-on token derivation in `tool-handlers.ts` AND the tool-input
+ *  side of acted_on in `telemetry.ts` use it — both sides of that match must
+ *  cut words the same way. Runs in scripts written without spaces are split
+ *  into ICU words (`segmentWords`). The only import is the core package, so
+ *  nobody can create a cycle through it. */
+
 export function tokens(text: string): string[] {
-  return text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? [];
+  return (text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? []).flatMap(segmentWords);
 }
 
 /**

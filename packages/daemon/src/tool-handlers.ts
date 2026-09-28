@@ -23,6 +23,7 @@ import {
   BodySentinelError,
   stripAutoRelatedSection,
   FUNCTION_WORDS,
+  isSignificantLength,
 } from "@bastra-recall/core";
 import { fireAndForget } from "./telemetry.js";
 import type { SaveHoldEvent } from "./telemetry-events.js";
@@ -331,7 +332,7 @@ export function distinctiveTokensForActedOn(text: string): string[] {
   return Array.from(
     new Set(
       words(text)
-        .filter((token) => token.length >= 4)
+        .filter((token) => isSignificantLength(token, 4))
         .filter((token) => !FUNCTION_WORDS.has(token))
         .filter((token) => !GENERIC_TRIGGER_WORDS.has(token)),
     ),

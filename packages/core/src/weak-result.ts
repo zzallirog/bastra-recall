@@ -1,3 +1,4 @@
+import { segmentWords, sameWordForm, WORD_FORM_MIN_LEN } from "./lexical.js";
 /**
  * #230 / #249 — the "nothing really matched" signal, shared by every recall path.
  *
@@ -35,15 +36,24 @@ import type { RecallHit } from "./search.js";
  * doubt the hit counts as a title match, which keeps `weak_result` conservative
  * and stops it from firing falsely.
  */
+/** A prefix only anchors when the shorter side is a word, not a letter:
+ *  a one-letter preposition in a title ("в", "a") used to be a prefix of
+ *  every query term that starts with it. */
+function prefixOfLongEnough(a: string, b: string): boolean {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return [...short].length >= WORD_FORM_MIN_LEN && long.startsWith(short);
+}
+
 export function hitTitleMatches(hit: RecallHit): boolean {
   if (!hit.matched_terms || hit.matched_terms.length === 0) return false;
   const titleTokens = hit.title
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap(segmentWords);
   return hit.matched_terms.some((term) => {
     const t = term.toLowerCase();
-    return titleTokens.some((tok) => tok === t || tok.startsWith(t) || t.startsWith(tok));
+    return titleTokens.some((tok) => tok === t || sameWordForm(tok, t) || prefixOfLongEnough(tok, t));
   });
 }
 

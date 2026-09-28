@@ -19,6 +19,14 @@ export {
 } from "./query-normalize.js";
 export { PHRASE_STOPWORDS, MIN_SIGNIFICANT_TOKEN_LEN, FUNCTION_WORDS, ALTERNATIVE_WORDS } from "./stopwords.js";
 export {
+  segmentWords,
+  hasSpacelessScript,
+  isSignificantLength,
+  sameWordForm,
+  hasWordForm,
+  WORD_FORM_MIN_LEN,
+} from "./lexical.js";
+export {
   capBm25Query,
   BM25_QUERY_MAX_CHARS,
   BM25_QUERY_MAX_TERMS,

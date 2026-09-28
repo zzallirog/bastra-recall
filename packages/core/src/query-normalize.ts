@@ -61,6 +61,8 @@ export function capAtWordBoundary(text: string, maxChars: number): string {
 // beweisbar linear (CodeQL js/polynomial-redos flaggte die Alternation-Form,
 // obwohl die Zweige disjunkt waren; die v-Flag-Klassen-Union bräuchte
 // target es2024).
+import { hasSpacelessScript, segmentWords } from "./lexical.js";
+
 const GLUE_CHARS = new Set([".", "-", "_"]);
 const SPLIT_CHAR_RE = /[\n\r\p{Z}\p{P}]/u;
 const GLUE_SPLIT_RE = /[._-]+/;
@@ -110,6 +112,13 @@ export function tokenizeWithIdentifiers(text: string): string[] {
   for (const raw of scanRawTokens(text)) {
     const token = trimGlue(raw);
     if (!token) continue;
+    // Han/Kana/Thai/…: no spaces between words, so the raw run is a whole
+    // sentence. ICU word segments go in instead — same function on the index
+    // and the query side, so the symmetry invariant above still holds.
+    if (hasSpacelessScript(token)) {
+      out.push(...segmentWords(token));
+      continue;
+    }
     out.push(token);
     if (GLUE_SPLIT_RE.test(token)) {
       for (const part of token.split(GLUE_SPLIT_RE)) {

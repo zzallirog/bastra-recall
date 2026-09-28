@@ -27,7 +27,14 @@
  * Client-Report via /hook/hinted (Phantom-Demand-Regel, telemetry.ts).
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { tokenizeWithIdentifiers, PHRASE_STOPWORDS, MIN_SIGNIFICANT_TOKEN_LEN, ALTERNATIVE_WORDS } from "@bastra-recall/core";
+import {
+  tokenizeWithIdentifiers,
+  PHRASE_STOPWORDS,
+  MIN_SIGNIFICANT_TOKEN_LEN,
+  ALTERNATIVE_WORDS,
+  hasWordForm,
+  isSignificantLength,
+} from "@bastra-recall/core";
 import type { Vault, Memory } from "@bastra-recall/core";
 import { envFirst, envInt } from "./env.js";
 import { readSettings } from "./settings.js";
@@ -110,7 +117,7 @@ function evaluatePhrase(
   }
   const tokens = tokenizeWithIdentifiers(phrase.toLowerCase());
   const meaningful = [
-    ...new Set(tokens.filter((t) => t.length >= MIN_TOKEN_LEN && !PHRASE_STOPWORDS.has(t))),
+    ...new Set(tokens.filter((t) => isSignificantLength(t, MIN_TOKEN_LEN) && !PHRASE_STOPWORDS.has(t))),
   ];
   if (meaningful.length === 0) return NO_CONTENT;
   if (meaningful.length === 1 && !IDENTIFIER_TOKEN_RE.test(meaningful[0])) {
@@ -125,7 +132,7 @@ function evaluatePhrase(
       tokens.length >= 2 &&
       contextSequence !== undefined &&
       contextSequence.includes(` ${tokens.join(" ")} `);
-    const found = contextTokens.has(meaningful[0]) ? 1 : 0;
+    const found = hasWordForm(contextTokens, meaningful[0]) ? 1 : 0;
     return {
       matched: literal,
       found,
@@ -134,7 +141,10 @@ function evaluatePhrase(
       guard: !literal && found === 1,
     };
   }
-  const missing = meaningful.filter((t) => !contextTokens.has(t));
+  // A case or verb ending is not a different word: "арке" in the prompt
+  // satisfies the trigger token "арка" (#565 needed a generative model for
+  // this; `hasWordForm` is the language-neutral suffix rule from core).
+  const missing = meaningful.filter((t) => !hasWordForm(contextTokens, t));
   return {
     matched: missing.length === 0,
     found: meaningful.length - missing.length,

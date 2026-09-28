@@ -3,7 +3,9 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { hasWordForm } from "@bastra-recall/core";
 import { envFirst, envInt, testRunLogDir } from "./env.js";
+import { tokens } from "./save-similarity.js";
 import { readJoinStateSync, writeJoinState } from "./telemetry-join-store.js";
 import { callerSessionField } from "./caller-session.js";
 import {
@@ -145,8 +147,12 @@ function surfacedHits(
   }));
 }
 
+/** The tool-input side of the acted_on match. It MUST cut words the way the
+ *  memory side does (`distinctiveTokensForActedOn` → `save-similarity.tokens`):
+ *  an ASCII-only scan here left every Cyrillic, Greek or CJK memory token
+ *  without a partner, so no such memory could ever count as acted on. */
 function tokenize(text: string): Set<string> {
-  return new Set(text.toLowerCase().match(/[a-z0-9][a-z0-9_-]*/g) ?? []);
+  return new Set(tokens(text));
 }
 
 /** Bump bei inkompatibler Snapshot-Shape — alte Snapshots werden dann verworfen. */
@@ -562,7 +568,7 @@ export class Telemetry {
 
       let matchStrength = 0;
       for (const token of entry.distinctive_tokens) {
-        if (inputTokens.has(token)) matchStrength++;
+        if (hasWordForm(inputTokens, token)) matchStrength++;
       }
       if (!closeOnMiss && matchStrength < 2) continue; // stays open (#144)
       entry.closed = true;
