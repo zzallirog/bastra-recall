@@ -1,8 +1,9 @@
 /**
  * Turns Claude Code delivers with role "user" although nobody typed them
- * (#639, #649, #703). One predicate for both lanes that read user turns — the
- * Stop lane (transcript heuristics) and the prompt lane (recall on
- * UserPromptSubmit) — so the two lists cannot drift apart again.
+ * (#639, #649, #703). One predicate for every reader of user turns — the Stop
+ * lane (transcript heuristics, and through it the after-session harvest), the
+ * prompt lane (recall on UserPromptSubmit) and the bridge harvest's query
+ * origin — so the lists cannot drift apart again (F11).
  *
  * Only the START of the turn counts. An owner prompt that quotes one of these
  * tags mid-text, or in backticks, is still an owner prompt.
@@ -29,8 +30,22 @@ function isAgentMail(head: string): boolean {
   return AGENT_MAIL_TAG.test(body);
 }
 
-/** True when the turn is a task notification or agent mail, not typed text. */
+/**
+ * Other harness-written turns: the skill body (it documents the frustration
+ * triggers itself — the second structural defect behind #48), system
+ * reminders, slash-command echoes and a subagent's hand-back.
+ */
+const INJECTED_PREFIXES = [
+  "Base directory for this skill:",
+  "<system-reminder>",
+  "<command-name>",
+  "<local-command-caveat>",
+  "[Subagent hand-back]",
+];
+
+/** True when the turn is harness-written (notification, agent mail, skill body,
+ *  reminder, command echo, hand-back), not typed text. */
 export function isSystemInjectedTurn(text: string): boolean {
   const head = text.trimStart();
-  return head.startsWith(TASK_NOTIFICATION) || isAgentMail(head);
+  return head.startsWith(TASK_NOTIFICATION) || isAgentMail(head) || INJECTED_PREFIXES.some((p) => head.startsWith(p));
 }

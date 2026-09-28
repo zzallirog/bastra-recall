@@ -108,30 +108,9 @@ function isToolResultContent(content: unknown): boolean {
   );
 }
 
-/**
- * System-injizierte Turns, die im Transcript als role "user" auftauchen, aber
- * keine getippte Prosa sind. Der Skill-Body (Prefix "Base directory for this
- * skill:") dokumentiert die Frust-Trigger SELBST — ohne diesen Ausschluss
- * triggert jede Session, die den bastra-Skill lädt, die frustration-Heuristik
- * auf der eigenen Doku (der zweite strukturelle Defekt hinter #48).
- */
-function isInjectedSystemContent(text: string): boolean {
-  const head = text.trimStart();
-  return (
-    head.startsWith("Base directory for this skill:") ||
-    head.startsWith("<system-reminder>") ||
-    head.startsWith("<command-name>") ||
-    head.startsWith("<local-command-caveat>") ||
-    // Task notifications and agent mail (#639, #649): the body is another
-    // agent's prose, so the decision and frustration heuristics would read it
-    // as the user's. Shared with the prompt lane (#703).
-    isSystemInjectedTurn(head)
-  );
-}
-
 function effectiveRole(role: string, content: unknown): string {
   if (role === "user" && isToolResultContent(content)) return "tool";
-  if (role === "user" && isInjectedSystemContent(stringifyContent(content))) return "system-injected";
+  if (role === "user" && isSystemInjectedTurn(stringifyContent(content))) return "system-injected";
   return role;
 }
 
@@ -144,7 +123,7 @@ export function normalizeTurns(items: unknown[]): TranscriptTurn[] {
     // feedback: …"), skill bodies, caveats — with `isMeta: true`. They carry
     // role "user" but no human typed them: the heuristics and the session
     // harvest (#675, which quotes candidates as "the user said this") must not
-    // read them as the user. The prefix list in isInjectedSystemContent stays
+    // read them as the user. The prefix list in system-turn.ts stays
     // for clients that do not set the flag.
     if (obj.isMeta === true) {
       out.push({ role: "system-injected", content: "" });
