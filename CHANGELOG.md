@@ -443,6 +443,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Env off-switches read one way** (audit F22). `BASTRA_TELEMETRY`,
+  `BASTRA_REFLEX`, `BASTRA_SIZE_CHECK` and `BASTRA_CODE_AWARENESS` only took
+  `off`; `BASTRA_RM_SHIM`, `BASTRA_GIT_SHIM`, `BASTRA_MCP_SESSION_CONTEXT` and
+  a few more only `0` — so `BASTRA_TELEMETRY=0` kept writing telemetry — and
+  `BASTRA_RM_ARCHIVES=true` silently switched the archive off over
+  `archive.enabled=on`. All of them now go through one parser (`0` | `false` |
+  `off` | `no` off, `1` | `true` | `on` | `yes` on); every value that worked
+  before still does.
+
 - **An auto-spawned daemon no longer runs on the MCP client's env as-is**
   (#684, first cut; report by @zzallirog). The forwarder spawned the shared
   daemon with `env: process.env`, so a client's `BASTRA_HOOK_TIMEOUT_MS` set

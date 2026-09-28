@@ -10,13 +10,14 @@ import { fileURLToPath } from "node:url";
 import { resolveDaemonEndpoint } from "./daemon-endpoint.js";
 import { daemonSpawnEnv } from "./daemon-spawn-env.js";
 import { readSettings } from "./settings.js";
+import { envOff } from "./env.js";
 
 // #531 — the same resolver the CLI, the daemon and the LaunchAgent use, so a
 // registration that carries only BASTRA_HTTP_PORT reaches the same instance a
 // registration carrying BASTRA_DAEMON_URL does.
 export const DAEMON_URL = resolveDaemonEndpoint().baseUrl;
 export const API_TOKEN = process.env.BASTRA_API_TOKEN ?? "";
-export const SPAWN_ENABLED = (process.env.BASTRA_FORWARDER_SPAWN ?? "1") !== "0";
+export const SPAWN_ENABLED = !envOff("BASTRA_FORWARDER_SPAWN");
 
 /** Cold Ollama load can take a while on first boot — generous on purpose. */
 const HEALTH_TIMEOUT_MS = 60_000;
