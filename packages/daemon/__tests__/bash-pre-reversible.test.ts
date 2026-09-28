@@ -102,6 +102,8 @@ const EXAMPLE: Record<string, string> = {
   "git commit --amend": "git commit --amend --no-edit",
   "git reflog expire": "git reflog expire --expire=now --all",
   "git reflog delete": "git reflog delete HEAD@{1}",
+  "git reflog drop": "git reflog drop --all",
+  "git commit --amend (reflog off)": "git -c core.logAllRefUpdates=false commit --amend --no-edit",
   "git gc --prune": "git gc --prune=now",
   "git -c gc.*Expire": "git -c gc.pruneExpire=now gc",
   "git config gc.*Expire": "git config gc.reflogExpire now",
