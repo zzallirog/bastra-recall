@@ -103,6 +103,18 @@ const PASSAGE_MODES: readonly PassageMode[] = ["short", "body"];
  */
 export const PRIMARY = { model: "en-de", passage: "short" as PassageMode, n: 10, cut: "r@3" } as const;
 
+/**
+ * #T02: the report prints "A run with a conspicuous timeout rate is
+ * DISCARDED, not interpreted" and nothing enforced it — `reports`,
+ * `primary_endpoint` and the `--out` artifact were written regardless of
+ * `vector_timeouts`/`vector_errors`. Same class of bug the file's own
+ * `rerank-model.ts` language guard was written to close (a comment
+ * describing a refusal nothing implements). One in twenty dense-arm calls
+ * failing is enough that the run is measuring the fallback path, not
+ * reranking.
+ */
+const DENSE_ARM_HEALTH_CUTOFF = 0.05;
+
 interface Args {
   gold: string[];
   models: string[];
@@ -212,6 +224,26 @@ export interface ArmHealth {
   vector_errors: number;
   wait_ms: number[];
   cases: number;
+}
+
+/**
+ * #T02: the discard rule the report claims to run.
+ * @throws when the combined timeout+error rate over the two arms is at or
+ * above DENSE_ARM_HEALTH_CUTOFF — the run measured the fallback path, not
+ * reranking, and no report is built from it.
+ */
+export function assertDenseArmHealthy(main: ArmHealth, guard: ArmHealth): void {
+  const totalCases = main.cases + guard.cases;
+  if (totalCases === 0) return;
+  const totalFailures = main.vector_timeouts + main.vector_errors + guard.vector_timeouts + guard.vector_errors;
+  const rate = totalFailures / totalCases;
+  if (rate >= DENSE_ARM_HEALTH_CUTOFF) {
+    throw new Error(
+      `dense-arm health: ${totalFailures} timeout(s)/error(s) over ${totalCases} recalls ` +
+        `(${(rate * 100).toFixed(1)}% ≥ ${(DENSE_ARM_HEALTH_CUTOFF * 100).toFixed(0)}% cutoff) — ` +
+        "DISCARDED per the latency protocol, not interpreted",
+    );
+  }
 }
 
 /**
@@ -402,6 +434,7 @@ async function main(): Promise<void> {
 
   const main = await collectPools(search, answerable, knownIds, "answerable");
   const guard = await collectPools(search, guardCases, knownIds, "no_answer");
+  assertDenseArmHealthy(main.health, guard.health);
   const rows = main.rows;
   const guardRows = guard.rows;
   // The cap the pool cannot exceed: HOP_SEED_POOL = max(k*4, 20) in
