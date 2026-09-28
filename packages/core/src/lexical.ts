@@ -31,11 +31,10 @@
  *    count ("में" is one letter), a Hangul syllable counts its jamo ("배포" is
  *    four), so every length threshold means the same thing in every script.
  * 4. `sameWordForm` — two tokens are the same word when they differ only in
- *    an ending: a long enough common prefix and a short enough length gap.
- *    This is the inflection rule of every language that inflects by suffix
- *    (Russian, German, English, Japanese okurigana) and it needs no stemmer.
- *    Short tokens (< 4 characters) stay exact — a two-letter prefix says
- *    nothing.
+ *    affixes: a long enough common stem with a short ending (every suffixing
+ *    language), a long ending on a long stem (agglutination: Finnish, Turkish,
+ *    Korean particles), or a short prefix before the stem (Arabic al-/bi-/wa-,
+ *    Hebrew ha-/be-/le-, Bantu noun classes). Short tokens stay exact.
  */
 
 /**
@@ -171,35 +170,108 @@ export function isSignificantLength(token: string, minLen: number): boolean {
 }
 
 const LETTERS_ONLY_RE = /^[\p{L}\p{M}]+$/u;
-/** Below this many characters two different tokens are never one word. */
+/** Below this many letters two different tokens are never one word. */
 export const WORD_FORM_MIN_LEN = 4;
-/** An ending longer than this is a different word, not an inflection. */
+/** The abjads write consonants only: a three-letter Hebrew or Arabic word
+ *  (ספר, كتب) carries what a five- or six-letter Latin word does. */
+const ABJAD_WORD_FORM_MIN_LEN = 3;
+const ABJAD_RE = /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Samaritan}\p{Script=Mandaic}]/u;
+/** An ending longer than this is a different word, not an inflection… */
 const WORD_FORM_MAX_GAP = 3;
+/** …unless the stem itself is at least this long: agglutinative endings
+ *  (Finnish -ssakin, Turkish -larında, Korean particle chains) are long, but
+ *  they hang on long stems. */
+const LONG_STEM = 6;
+/** A prefix (article, clitic, noun-class marker) is at most this long. */
+const WORD_FORM_MAX_PREFIX = 3;
+/** The stem a prefix is stripped against must be this long outside the
+ *  abjads — shorter stems rhyme by accident ("range"/"orange"). */
+const PREFIXED_STEM_MIN = 6;
+
+function minWordFormLetters(token: string): number {
+  return ABJAD_RE.test(token) ? ABJAD_WORD_FORM_MIN_LEN : WORD_FORM_MIN_LEN;
+}
+
+/**
+ * The characters `sameWordForm` compares: canonical decomposition with every
+ * combining mark kept on its base letter, so "й", "é" and a Devanagari
+ * consonant with its vowel sign each stay one character, while a Hangul
+ * syllable opens into its jamo (letters in their own right, not marks).
+ */
+function formUnits(token: string): string[] {
+  const out: string[] = [];
+  for (const ch of token.normalize("NFD")) {
+    if (out.length > 0 && COMBINING_MARK_RE.test(ch)) out[out.length - 1] += ch;
+    else out.push(ch);
+  }
+  return out;
+}
+const COMBINING_MARK_RE = /\p{M}/u;
+
+function indexOfRun(hay: string[], needle: string[], from: number, to: number): number {
+  outer: for (let i = from; i <= to && i + needle.length <= hay.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
 
 /**
  * Are `a` and `b` forms of the same word? Case-sensitive — callers compare
- * lowercased tokens. Exact equality always holds. Otherwise both must be
- * letters only (identifiers, numbers and paths stay exact), the shorter at
- * least `WORD_FORM_MIN_LEN` characters, the lengths at most
- * `WORD_FORM_MAX_GAP` apart, and the common prefix must cover the shorter
- * token except its last character (≤ 5 characters) or its last two (longer).
+ * folded tokens (`foldTerm`). Exact equality always holds. Otherwise both
+ * must be letters only (identifiers, numbers and paths stay exact), the
+ * shorter at least `WORD_FORM_MIN_LEN` letters (three in the abjads), and one
+ * of three shapes must hold, compared on canonically decomposed characters:
  *
- *   арка ~ арке ~ арку · снял ~ снять · забрать ~ забрал · Antwort ~ antworten
- *   切り替え ~ 切り替える · update ~ updated
- *   state ≁ statement (gap 4) · code ≁ card · ci ≁ cd (too short)
+ * - suffix: the common prefix covers the shorter token except its last
+ *   character (≤ 5 characters) or its last two, and the lengths are at most
+ *   `WORD_FORM_MAX_GAP` apart — or any distance when the shared stem is the
+ *   whole shorter token less one character and at least `LONG_STEM` long;
+ * - prefix: the shorter token, less at most two trailing characters, sits
+ *   inside the longer one after a prefix of one to `WORD_FORM_MAX_PREFIX`
+ *   characters (or with its first character swapped for another one), with
+ *   at most `WORD_FORM_MAX_GAP` after it; that stem needs `PREFIXED_STEM_MIN`
+ *   characters outside the abjads.
+ *
+ *   арка ~ арке · Antwort ~ antworten · 切り替え ~ 切り替える · update ~ updated
+ *   laskun ~ laskuissa · şablonu ~ şablonlarında · 청구서 ~ 청구서들을
+ *   قالب ~ بالقالب · חשבונית ~ החשבוניות · kiolezo ~ violezo
+ *   state ≁ statement · range ≁ orange · code ≁ card · ci ≁ cd
  */
 export function sameWordForm(a: string, b: string): boolean {
   if (a === b) return true;
-  const ca = [...a];
-  const cb = [...b];
-  const min = Math.min(ca.length, cb.length);
-  if (min < WORD_FORM_MIN_LEN) return false;
-  if (Math.abs(ca.length - cb.length) > WORD_FORM_MAX_GAP) return false;
   if (!LETTERS_ONLY_RE.test(a) || !LETTERS_ONLY_RE.test(b)) return false;
+  const ua = formUnits(a);
+  const ub = formUnits(b);
+  const [s, l] = ua.length <= ub.length ? [ua, ub] : [ub, ua];
+  const shorter = s === ua ? a : b;
+  const minLetters = minWordFormLetters(shorter);
+  if (letterCount(shorter) < minLetters) return false;
+  const gap = l.length - s.length;
+
   let prefix = 0;
-  while (prefix < min && ca[prefix] === cb[prefix]) prefix++;
-  const need = Math.max(3, min <= 5 ? min - 1 : min - 2);
-  return prefix >= need;
+  while (prefix < s.length && s[prefix] === l[prefix]) prefix++;
+  if (prefix === s.length && gap === 0) return true; // NFC vs NFD spelling
+  // A three-character stem has no ending to spare: ספר ~ ספרים, not ספר ~ ספק.
+  const need = s.length <= 3 ? s.length : Math.max(3, s.length <= 5 ? s.length - 1 : s.length - 2);
+  if (prefix >= need && gap <= WORD_FORM_MAX_GAP) return true;
+  // A long ending needs the whole shorter token (less one character) as its
+  // stem: laskun ~ laskuissa, not contract ~ contradiction.
+  if (prefix >= Math.max(LONG_STEM, s.length - 1)) return true;
+
+  const stemMin = minLetters === WORD_FORM_MIN_LEN ? PREFIXED_STEM_MIN : ABJAD_WORD_FORM_MIN_LEN;
+  for (let lead = 0; lead <= 1; lead++) {
+    for (let trail = 0; trail <= 2; trail++) {
+      const stem = s.slice(lead, s.length - trail);
+      if (stem.length < stemMin) continue;
+      // A changed first character is a swapped prefix of the same size
+      // (ki-/vi-, ال/لل), not room for a longer one (decision ≁ precision).
+      const at = indexOfRun(l, stem, 1, lead === 1 ? 1 : WORD_FORM_MAX_PREFIX);
+      if (at < 0) continue;
+      if (l.length - at - stem.length <= WORD_FORM_MAX_GAP) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -208,7 +280,7 @@ export function sameWordForm(a: string, b: string): boolean {
  */
 export function hasWordForm(tokens: ReadonlySet<string>, word: string): boolean {
   if (tokens.has(word)) return true;
-  if ([...word].length < WORD_FORM_MIN_LEN) return false;
+  if (letterCount(word) < ABJAD_WORD_FORM_MIN_LEN) return false;
   for (const t of tokens) {
     if (sameWordForm(word, t)) return true;
   }
