@@ -1071,11 +1071,12 @@ function formatCacheTimerSegment(
 function cacheTimerStyle(
   elapsed: number,
   colors: PowerlineColors,
+  ttlSeconds = 300,
 ): { fg: string; bold: boolean } {
-  if (elapsed >= 300) {
+  if (elapsed >= ttlSeconds) {
     return { fg: colors.contextCriticalFg, bold: colors.contextCriticalBold };
   }
-  if (elapsed >= 180) {
+  if (elapsed >= ttlSeconds * 0.6) {
     return { fg: colors.contextWarningFg, bold: colors.contextWarningBold };
   }
   return { fg: colors.cacheTimerFg, bold: colors.cacheTimerBold };
@@ -1501,7 +1502,11 @@ export function resolveSegments(
 
   // CacheTimer
   const cacheTimerElapsed = data.cacheTimerInfo?.elapsedSeconds ?? 0;
-  const cacheTimerStyleResolved = cacheTimerStyle(cacheTimerElapsed, colors);
+  const cacheTimerStyleResolved = cacheTimerStyle(
+    cacheTimerElapsed,
+    colors,
+    data.cacheTimerInfo?.detectedTtlSeconds,
+  );
   const cacheTimerColor = pf?.["cacheTimer"] ?? cacheTimerStyleResolved.fg;
   result.cacheTimer = colorizeOrEmpty(
     formatCacheTimerSegment(data, sym, iconVisible.cacheTimer),
