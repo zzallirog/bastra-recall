@@ -14,9 +14,25 @@ import { readSettings } from "./settings.js";
 // #531 — the same resolver the CLI, the daemon and the LaunchAgent use, so a
 // registration that carries only BASTRA_HTTP_PORT reaches the same instance a
 // registration carrying BASTRA_DAEMON_URL does.
-export const DAEMON_URL = resolveDaemonEndpoint().baseUrl;
+const daemonEndpoint = resolveDaemonEndpoint();
+export const DAEMON_URL = daemonEndpoint.baseUrl;
 export const API_TOKEN = process.env.BASTRA_API_TOKEN ?? "";
 export const SPAWN_ENABLED = (process.env.BASTRA_FORWARDER_SPAWN ?? "1") !== "0";
+
+/**
+ * S05: spawnDaemon() below always binds its child to 127.0.0.1 — it can never
+ * make a non-loopback DAEMON_URL answer. Without this check, an unreachable
+ * remote/tunnelled endpoint made the forwarder spawn a same-port LOCAL daemon
+ * with the LOCAL vault, then poll the still-remote DAEMON_URL forever: the
+ * spawned process runs pointlessly, and if the endpoint host happens to be a
+ * loopback tunnel target, the spawn also squats the port the tunnel needs
+ * (tracked separately as #684/#719 — not this check, which only covers a
+ * configured endpoint that was never loopback to begin with).
+ */
+function isLoopbackHostname(host: string): boolean {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+export const DAEMON_URL_IS_LOOPBACK = isLoopbackHostname(daemonEndpoint.host);
 
 /** Cold Ollama load can take a while on first boot — generous on purpose. */
 const HEALTH_TIMEOUT_MS = 60_000;
@@ -104,6 +120,12 @@ export async function ensureDaemonRunning(): Promise<boolean> {
   if (!SPAWN_ENABLED) {
     console.error(
       "[bastra-recall-mcp] daemon not running and auto-spawn disabled (BASTRA_FORWARDER_SPAWN=0). Returning errors for tool calls until daemon is up.",
+    );
+    return false;
+  }
+  if (!DAEMON_URL_IS_LOOPBACK) {
+    console.error(
+      `[bastra-recall-mcp] daemon at ${DAEMON_URL} is unreachable, and it is not a loopback address — spawning a local daemon could not make it answer. Returning errors for tool calls until it is back.`,
     );
     return false;
   }
