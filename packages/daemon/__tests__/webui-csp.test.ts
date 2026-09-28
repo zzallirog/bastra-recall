@@ -89,10 +89,10 @@ test("CSP: the document carries a policy that bounds where the map may talk", as
   // diesen Test bewusst anfassen.
   assert.ok(!csp.includes("unsafe-eval"), "the viewer needs no eval");
   assert.match(csp, /script-src 'self'/);
-  assert.ok(
-    !/script-src[^;]*unsafe-inline/.test(csp),
-    "inline script must stay forbidden — style attributes are the only inline exception",
-  );
+  assert.ok(!/script-src[^;]*unsafe-inline/.test(csp), "inline script must stay forbidden");
+  // X05: index.html carries no style="" attributes any more — 'unsafe-inline'
+  // on style-src would now be unused permission, not a documented exception.
+  assert.ok(!/style-src[^;]*unsafe-inline/.test(csp), "no style= attribute justifies unsafe-inline any more");
 
   // Kein Einbetten, kein Plugin, kein umgebogener <base>.
   assert.match(csp, /frame-ancestors 'none'/);
