@@ -398,7 +398,19 @@ async function main(): Promise<void> {
   const beatsForeignCrossed = ownArm.crossedIn > foreignArm.crossedIn;
   const beatsForeignDelta = ownArm.meanDeltaRank < foreignArm.meanDeltaRank;
   const beatsForeign = beatsForeignCrossed && beatsForeignDelta;
-  const promote = ownShowsLift && nearWithinNull && beatsForeign;
+  // #T01: the three sanity checks printed below (DATA-STARVED, HOLDOUT
+  // SANITY, ARM-DIVERGENCE SANITY) were computed and printed but never fed
+  // into `promote` — a 1-4-case OOP slice could satisfy ownShowsLift by
+  // construction and still print ">>> PROMOTE <<<" next to its own
+  // "treat the number as noise" warning.
+  const totalCasesForSanity = near.length + farInPool.length + oop.length;
+  const nearFracForSanity = totalCasesForSanity ? near.length / totalCasesForSanity : NaN;
+  const identicalFracForSanity = cases.length ? identicalArms / cases.length : NaN;
+  const dataStarved = oop.length < 5 || near.length < 5;
+  const holdoutSanityFailed = nearFracForSanity >= 0.9;
+  const armDivergenceSanityFailed = cases.length > 0 && identicalFracForSanity >= 0.98;
+  const promote =
+    ownShowsLift && nearWithinNull && beatsForeign && !dataStarved && !holdoutSanityFailed && !armDivergenceSanityFailed;
 
   // ── Print ──────────────────────────────────────────────────────────────────
   const pct = (x: number): string => (Number.isNaN(x) ? "n/a" : `${(x * 100).toFixed(1)}%`);
@@ -469,6 +481,7 @@ async function main(): Promise<void> {
   console.log(`    near-reg ≤ null              : ${nearWithinNull ? "yes" : "no"} (own ${pct(ownArm.nearRegression)} vs null ${pct(foreignArm.nearRegression)})`);
   console.log(`    own beats foreign (crossed-in): ${beatsForeignCrossed ? "yes" : "no"} (own ${pct(ownArm.crossedIn)} vs foreign ${pct(foreignArm.crossedIn)})`);
   console.log(`    own beats foreign (meanΔrank) : ${beatsForeignDelta ? "yes" : "no"} (own ${num(ownArm.meanDeltaRank)} vs foreign ${num(foreignArm.meanDeltaRank)})`);
+  console.log(`    sanity checks clean           : ${!dataStarved && !holdoutSanityFailed && !armDivergenceSanityFailed ? "yes" : "no"}${dataStarved ? " (DATA-STARVED)" : ""}${holdoutSanityFailed ? " (HOLDOUT SANITY)" : ""}${armDivergenceSanityFailed ? " (ARM-DIVERGENCE SANITY)" : ""}`);
   console.log("");
   console.log(`    >>> ${promote ? "PROMOTE" : "DO NOT PROMOTE"} <<<`);
   console.log("");
