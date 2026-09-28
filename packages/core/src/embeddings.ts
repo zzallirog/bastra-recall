@@ -20,6 +20,7 @@ import * as path from "node:path";
 import type { Memory } from "./schema.js";
 import type { Vault, VaultEvent } from "./vault.js";
 import { EmbedCache, embedBody, hashEmbedContent } from "./embed-cache.js";
+import { normalizeText } from "./lexical.js";
 import { RRF_K, RRF_SCALE, rrfVectorWeight } from "./rrf.js";
 // #493: Die Provider stehen seit dem 800-Zeilen-Schnitt daneben. Re-exportiert,
 // damit jeder bestehende Import aus `embeddings.js` unverändert weiterläuft.
@@ -291,6 +292,7 @@ export class EmbeddingIndex {
       providerLoadMs: null,
       coldStartObserved: false,
     });
+    query = normalizeText(query); // the spelling the documents were embedded in
     if (!query.trim() || this.vectors.size === 0) return empty();
     let q: Float32Array;
     let loadMs: number | null = null;
@@ -609,7 +611,10 @@ export class EmbeddingIndex {
 
 /** Baut den Text der ein Memory vector-mäßig repräsentiert. Title +
  *  Tags + recall_when + Summary + Body-Anfang ohne Auto-Related-Section
- *  (#631, siehe `embedBody`), auf 4000 chars limitiert (Token-Budget). */
+ *  (#631, siehe `embedBody`), auf 4000 chars limitiert (Token-Budget).
+ *  In derselben Schreibweise wie die Query (`normalizeText`): eine auf macOS
+ *  getippte NFD-Notiz und eine NFC-Frage sind sonst zwei Texte fürs Modell —
+ *  gemessen an koreanischem Jamo (lang-parity). */
 function buildEmbedText(m: Memory): string {
   const fm = m.fm;
   const parts = [
@@ -619,7 +624,7 @@ function buildEmbedText(m: Memory): string {
     fm.summary,
     embedBody(m),
   ];
-  return parts.filter((p) => p && p.length > 0).join("\n");
+  return normalizeText(parts.filter((p) => p && p.length > 0).join("\n"));
 }
 
 export function cosine(a: Float32Array, b: Float32Array): number {
