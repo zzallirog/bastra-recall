@@ -83,10 +83,23 @@ export class Vault {
    * nicht lesen kann, verbergen beide eine id.
    */
   private unreadableFiles = new Set<string>();
+  /**
+   * True once `init()` has confirmed the root existed as a directory at
+   * least once. A save into a root that this flag has already confirmed, but
+   * that is missing right now, is a mount that vanished under a running
+   * daemon — not the "vault created on first save" case, which is a root
+   * this flag never saw. save.ts uses this to refuse recreating a vault it
+   * once knew, instead of silently `mkdir`-ing a fresh empty one on the
+   * parent filesystem (#S08).
+   */
+  rootPresentAtInit = false;
 
   constructor(public readonly root: string) {}
 
   async init(): Promise<{ loaded: number; skipped: { path: string; err: string }[] }> {
+    this.rootPresentAtInit = await stat(this.root)
+      .then((st) => st.isDirectory())
+      .catch(() => false);
     // Reihenfolge stabil halten: nach Pfad sortieren bevor wir parallel laden.
     // So bleibt die Map-Iterationsordnung deterministisch (Maps iterieren in
     // Insertion-Order; wir setzen die Ergebnisse in Pfad-Sortierreihenfolge).

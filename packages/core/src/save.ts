@@ -7,7 +7,7 @@
  * (the id-level claim) and `save-target.ts` (where the file goes). They were
  * split out when this file passed 800 lines; nothing changed but the location.
  */
-import { writeFile, mkdir, unlink, rename, link } from "node:fs/promises";
+import { writeFile, mkdir, unlink, rename, link, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import matter from "gray-matter";
 import { SUMMARY_MAX } from "./summary.js";
@@ -401,6 +401,23 @@ async function commitMemory(
     }
   }
 
+  // #S08: a root this daemon has confirmed present before, but that is
+  // missing right now, is a mount that vanished under it — `mkdir(recursive)`
+  // would otherwise recreate the whole tree, root included, on the parent
+  // filesystem and silence `vault_missing` on every /health and recall from
+  // then on. A root never confirmed present is the legitimate
+  // "created on first save" case and is still created on demand.
+  if (commit.vaultRootKnownPresent === true) {
+    const rootExists = await stat(vaultRoot)
+      .then((st) => st.isDirectory())
+      .catch(() => false);
+    if (!rootExists) {
+      throw new Error(
+        `the vault at ${vaultRoot} is missing — it was present before but is not now ` +
+          `(unmounted drive, dropped network share). Refusing to recreate it; remount it and retry.`,
+      );
+    }
+  }
   await mkdir(dirname(filePath), { recursive: true });
   // Atomar via temp+rename — dieselbe Begründung wie in related-enrich.ts:241
   // ("ein direkter writeFile lässt das File kurzzeitig leer, live beobachtet").

@@ -366,6 +366,17 @@ export interface SaveMemoryCommitOptions {
    * Import-Ausnahme keine mehr; wer die Auskunft fälschen will, muss die
    * Transaktion direkt aufrufen, nicht den Save.
    */
+  /**
+   * Whether the vault root existed the last time this daemon confirmed it
+   * (`Vault.rootPresentAtInit`, #S08). A root save.ts has never confirmed
+   * present is the "created on first save" case and may be `mkdir`ed.
+   * A root that WAS confirmed present but is missing right now is a mount
+   * that vanished under a running daemon — `mkdir` would recreate it on the
+   * parent filesystem and silence `vault_missing` for good, so the save is
+   * refused instead. Absent/undefined (a caller with no Vault, e.g. import
+   * or a script) keeps the old create-on-demand behaviour.
+   */
+  vaultRootKnownPresent?: boolean;
 }
 
 export const MEMORY_WRITE_CONFLICT = "BASTRA_WRITE_CONFLICT";
