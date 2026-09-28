@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { sameWordForm, segmentWords, isSignificantLength, hasWordForm } from "../src/lexical.js";
+import { sameWordForm, segmentWords, isSignificantLength, hasWordForm, stemVariants } from "../src/lexical.js";
 import { tokenizeWithIdentifiers } from "../src/query-normalize.js";
 import { hitTitleMatches } from "../src/weak-result.js";
 import { Vault } from "../src/vault.js";
@@ -169,4 +169,33 @@ test("hitTitleMatches: a one-letter title word anchors nothing; a real word form
   assert.equal(hitTitleMatches(hit("A note on caching", ["address"])), false, "'a' is not a prefix anchor");
   assert.equal(hitTitleMatches(hit("Правка арки перед ревью", ["арке"])), true, "case ending still anchors");
   assert.equal(hitTitleMatches(hit("Caching strategy", ["cach"])), true, "a stemmed prefix of a word still anchors");
+});
+
+test("stemVariants: a long inflected query word also asks for its stems; short words and identifiers do not", () => {
+  assert.ok(stemVariants("skriptillä").includes("skripti"));
+  assert.ok(stemVariants("deploying").includes("deploy"));
+  assert.ok(stemVariants("스크립트를").includes("스크립트"));
+  assert.deepEqual(stemVariants("deploy"), [], "under seven letters: no stems");
+  assert.deepEqual(stemVariants("my-app.config"), [], "identifiers stay whole");
+  assert.deepEqual(stemVariants("部署脚本在哪里"), [], "spaceless scripts are segmented, not truncated");
+  for (const s of stemVariants("stagingiin")) assert.ok([...s].length >= 5);
+});
+
+test("BM25: an inflected Finnish query word reaches the stored base form", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "bastra-lexical-fi-"));
+  await writeFile(path.join(dir, "fi.md"), memo("deploy-fi", "Staging-palvelimen deploy-skripti", "staging deploy-skripti", "Aja skripti."), "utf8");
+  await writeFile(path.join(dir, "en.md"), memo("backup-en", "Backup rotation keeps seven snapshots", "changing backup rotation", "Seven snapshots."), "utf8");
+  const vault = new Vault(dir);
+  await vault.init();
+  const idx = new SearchIndex(vault);
+  idx.start();
+  try {
+    const plain = idx.recall("skriptillä", { k: 3 });
+    assert.equal(plain[0]?.id, "deploy-fi", `hits: ${plain.map((h) => h.id).join(",")}`);
+    assert.deepEqual(idx.recall("skriptillä", { k: 3, bm25_no_fuzzy: true }), [], "the fast path expands nothing");
+  } finally {
+    idx.stop();
+    await vault.stop?.();
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
 });

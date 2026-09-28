@@ -4,7 +4,7 @@ import type { EmbeddingIndex } from "./embeddings.js";
 import { fuseRRF, RRF_SCALE } from "./embeddings.js";
 import type { RecallStage, StageListener } from "./recall-stages.js";
 import { normalizeQuery, tokenizeWithIdentifiers } from "./query-normalize.js";
-import { foldTerm, isSignificantLength } from "./lexical.js";
+import { foldTerm, isSignificantLength, stemVariants } from "./lexical.js";
 import { MIN_SIGNIFICANT_TOKEN_LEN } from "./stopwords.js";
 import { DocFreqMiniSearch } from "./doc-freq-index.js";
 import { rareTermFuzzy } from "./bm25-expansion.js";
@@ -708,17 +708,29 @@ export class SearchIndex {
       maxChars: opts.bm25_query_max_chars ?? 0,
     });
     const grouped = groupQueryTerms(capped, tokenizeWithIdentifiers);
+    // Inflected query words reach their stored base form (lexical.ts
+    // `stemVariants`): "skriptillä" also asks for the prefix "skripti", at a
+    // fraction of the word's own weight. Not query terms of their own — the
+    // anchor and authored-term checks below see only what the user wrote.
+    const STEM_BOOST = 0.3;
+    // `bm25_no_fuzzy` is the no-expansion fast path: no stems either.
+    const stems = new Map<string, number>();
+    if (!opts.bm25_no_fuzzy) for (const [term, n] of grouped.counts) {
+      for (const stem of stemVariants(term)) {
+        if (!grouped.counts.has(stem)) stems.set(stem, Math.max(stems.get(stem) ?? 0, n * STEM_BOOST));
+      }
+    }
     const fuzzy = rareTermFuzzy((term) => this.mini.docFreq(term), opts.bm25_fuzzy_rare_df_max);
     // #362 Phase 3: `bm25_no_fuzzy` schlägt die feinere Steuerung — wer den
     // schnellen Pfad anfordert, will keine Expansion, auch keine selektive.
     const fuzzyOption = opts.bm25_no_fuzzy ? { fuzzy: false } : fuzzy ? { fuzzy } : {};
     return {
-      lexQuery: grouped.query,
+      lexQuery: stems.size > 0 ? `${grouped.query} ${[...stems.keys()].join(" ")}` : grouped.query,
       searchOptions: {
         // Die Query ist bereits die Termliste — erneut zerlegen würde die
         // Dual-Emission des Identifier-Tokenizers ein zweites Mal anwenden.
         tokenize: groupedTokenize,
-        boostTerm: (term: string) => grouped.counts.get(term) ?? 1,
+        boostTerm: (term: string) => grouped.counts.get(term) ?? stems.get(term) ?? 1,
         ...fuzzyOption,
       },
       queryTerms: new Set(grouped.counts.keys()),

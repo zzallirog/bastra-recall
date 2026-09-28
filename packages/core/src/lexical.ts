@@ -289,6 +289,32 @@ export function sameWordForm(a: string, b: string): boolean {
   return false;
 }
 
+/** A query word needs this many letters before its stem is tried as well. */
+const STEM_VARIANT_MIN_LETTERS = 7;
+/** …and the stem keeps at least this many: a short stem prefixes everything. */
+const STEM_MIN_LETTERS = 5;
+
+/**
+ * The stems of a long query word, for a PREFIX search: the word less one to
+ * three trailing characters, each still at least five letters long.
+ * "skriptillä" → "skripti…", "deploying" → "deploy", "스크립트를" → "스크립트".
+ * The suffix rule of `sameWordForm`, turned around for an index that only
+ * matches a query term as the prefix of a stored one: an inflected query word
+ * then still reaches the stored base form — in every suffixing language, with
+ * no stemmer. Letters-only words of spaced scripts only.
+ */
+export function stemVariants(term: string): string[] {
+  if (!LETTERS_ONLY_RE.test(term) || hasSpacelessScript(term)) return [];
+  if (letterCount(term) < STEM_VARIANT_MIN_LETTERS) return [];
+  const chars = [...term.normalize("NFC")];
+  const out: string[] = [];
+  for (let cut = 1; cut <= 3; cut++) {
+    const stem = chars.slice(0, chars.length - cut).join("");
+    if (letterCount(stem) >= STEM_MIN_LETTERS) out.push(stem);
+  }
+  return out;
+}
+
 /**
  * Does `tokens` contain a form of `word`? Exact lookup first (O(1)); the
  * word-form scan only runs when the exact lookup misses.
