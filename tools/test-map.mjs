@@ -221,9 +221,20 @@ export function parseLcov(text, root = ROOT) {
 
 /** The environment for a `node --test` of our own. Started from inside a test run, Node
  * marks it NODE_TEST_CONTEXT=child and the child streams its results to a parent that
- * is not listening: no reporter writes, no lcov, an empty map. */
+ * is not listening: no reporter writes, no lcov, an empty map.
+ * A reporter in NODE_OPTIONS (a CI or wrapper asking for `spec`) is the same trap from
+ * the other side: Node adds it to the two reporters `runOne` pins, then refuses a run
+ * whose reporters outnumber their destinations — every file "failed", an empty map. */
 function ownRunner() {
-  const { NODE_TEST_CONTEXT, ...env } = process.env;
+  const { NODE_TEST_CONTEXT, NODE_OPTIONS, ...env } = process.env;
+  const kept = [];
+  const opts = (NODE_OPTIONS ?? "").split(/\s+/).filter(Boolean);
+  for (let i = 0; i < opts.length; i++) {
+    const m = /^--test-reporter(?:-destination)?(=)?/.exec(opts[i]);
+    if (!m) kept.push(opts[i]);
+    else if (!m[1]) i++; // `--test-reporter spec`: the value is the next word
+  }
+  if (kept.length > 0) env.NODE_OPTIONS = kept.join(" ");
   return env;
 }
 

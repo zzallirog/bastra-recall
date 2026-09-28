@@ -601,6 +601,21 @@ describe("test-map: select over a real repo and a real map", () => {
     assert.deepEqual(JSON.parse(readFileSync(join(repo, ".test-map", "map-only.json"), "utf8")).tests.map((t) => t.file), ["t/a.test.mjs"]);
   });
 
+  // Revert-check: pass NODE_OPTIONS through unchanged in ownRunner → Node refuses every
+  // child run (3 reporters, 2 destinations), each file "failed" → red.
+  it("a reporter in NODE_OPTIONS (a CI wrapper asking for spec) does not empty the map", async () => {
+    const prev = process.env.NODE_OPTIONS;
+    process.env.NODE_OPTIONS = `${prev ? `${prev} ` : ""}--test-reporter=spec --test-reporter dot`;
+    try {
+      const again = await build({ root: repo, jobs: 3 });
+      assert.equal(again.tests.length, m.tests.length);
+      assert.deepEqual(again.tests.filter((t) => "exit" in t && t.exit !== 0).map((t) => t.file), []);
+    } finally {
+      if (prev === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = prev;
+    }
+  });
+
   it("the CLI answers a bad flag with a usage line and exit 2", () => {
     const out = cli("build", "--jobs");
     assert.equal(out.status, 2);
