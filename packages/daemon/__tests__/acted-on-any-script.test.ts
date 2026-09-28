@@ -111,6 +111,17 @@ test("reflex: a Japanese trigger fires on a Japanese prompt", () => {
   assert.equal(phraseMatchesContext("ゲームモード 設定", tokens, seq), true);
 });
 
+// Revert-check: drop the Hiragana rule in lexical.ts isSignificantLength →
+// "する"/"とき" stay required and this test is red.
+test("reflex: Japanese grammar in the trigger is not demanded from the prompt", () => {
+  const [tokens, seq] = ctx("このブランチを公開リポジトリにプッシュして");
+  assert.equal(phraseMatchesContext("公開リポジトリにプッシュするとき", tokens, seq), true);
+  const [t2, s2] = ctx("ゲームモードを切り替えたらどうなる？");
+  assert.equal(phraseMatchesContext("ゲームモードを切り替えるとき", t2, s2), true);
+  const [t3, s3] = ctx("ブランチを削除して");
+  assert.equal(phraseMatchesContext("公開リポジトリにプッシュするとき", t3, s3), false, "content words still decide");
+});
+
 test("reflex stays strict: a missing content word still blocks the trigger", () => {
   const [tokens, seq] = ctx("глянь что в арке");
   assert.equal(phraseMatchesContext("ревью арка", tokens, seq), false);

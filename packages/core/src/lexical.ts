@@ -64,14 +64,23 @@ export function segmentWords(token: string): string[] {
   return out.length > 0 ? out : [token];
 }
 
+const HIRAGANA_ONLY_RE = /^\p{Script=Hiragana}+$/u;
+
 /**
- * Is `token` long enough to carry meaning on its own? A Latin or Cyrillic
- * word of two letters is a function word; a two-character Han or Kana word
- * (移行, 起動) is a content word. `minLen` is the threshold for alphabetic
+ * Does `token` carry meaning on its own? A Latin or Cyrillic word of two
+ * letters is a function word; a two-character Han or Katakana word (移行,
+ * 起動, モード) is a content word. `minLen` is the threshold for alphabetic
  * scripts; spaceless scripts need two characters.
+ *
+ * A token written only in Hiragana is grammar — particles, auxiliaries and
+ * conjugation endings (を, する, とき, ない); Japanese writes its content words
+ * in Kanji or Katakana. A trigger such as "公開リポジトリにプッシュするとき"
+ * otherwise demanded "する" and "とき" from a prompt that said "プッシュして".
+ * A rule of the script, not a word list.
  */
 export function isSignificantLength(token: string, minLen: number): boolean {
   const len = [...token].length;
+  if (HIRAGANA_ONLY_RE.test(token)) return false;
   if (hasSpacelessScript(token)) return len >= Math.min(2, minLen);
   return len >= minLen;
 }

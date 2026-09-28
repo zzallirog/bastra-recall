@@ -81,6 +81,10 @@ test("isSignificantLength: a two-character Han/Kana word is content, a two-lette
   assert.equal(isSignificantLength("on", 3), false);
   assert.equal(isSignificantLength("во", 3), false);
   assert.equal(isSignificantLength("арка", 3), true);
+  // Hiragana-only tokens are grammar (particles, auxiliaries, endings).
+  assert.equal(isSignificantLength("とき", 3), false);
+  assert.equal(isSignificantLength("する", 3), false);
+  assert.equal(isSignificantLength("プッシュ", 3), true);
 });
 
 test("tokenizeWithIdentifiers: Japanese reaches the index as words; identifiers keep dual emission", () => {
