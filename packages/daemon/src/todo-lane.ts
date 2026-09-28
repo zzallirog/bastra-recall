@@ -18,7 +18,7 @@
 // #305: subpath leafs, never the core barrel — measured +40ms of process
 // start against +0.8ms for the three leafs, on a fresh spawn per event.
 import { RRF_K, RRF_SCALE } from "@bastra-recall/core/rrf";
-import { FUNCTION_WORDS } from "@bastra-recall/core";
+import { FUNCTION_WORDS, isSignificantLength, segmentWords } from "@bastra-recall/core";
 import { requiredHeadline, unfusedHeadline, unfusedReasonFor } from "./band-wording.js";
 import { applyLaneScopeFilter, projectConfidence, projectForFilter, projectForLane, type ScopeFilterMode } from "./scope-filter.js";
 import { HINT_FRAME_NOTE, stripFenceMarkers } from "@bastra-recall/core/scrub";
@@ -141,13 +141,16 @@ export function extractTopicsFromTodos(todosRaw: unknown): TopicExtraction {
   // Per-todo unique word sets — count "appears in >= N todos", not raw freq,
   // so a single chatty todo can't dominate the topic list.
   const perTodoWords: Set<string>[] = contents.map((c) => {
+    // Letters of any script (F19); spaceless scripts are segmented into words.
     const words = c
+      .normalize("NFC")
       .toLowerCase()
       // #707: letters of every script — `[a-z0-9äöüß]` dropped Cyrillic,
       // Greek, CJK … entirely, so a non-Latin todo list had no topics.
       .replace(/[^\p{L}\p{M}\p{N}\s-]/gu, " ")
       .split(/\s+/)
-      .filter((w) => w.length >= 3 && !TODO_NOISE.has(w));
+      .flatMap((t) => segmentWords(t))
+      .filter((w) => isSignificantLength(w, 3) && !TODO_NOISE.has(w));
     return new Set(words);
   });
 
