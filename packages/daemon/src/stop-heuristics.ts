@@ -241,7 +241,7 @@ export function detectArchitectureDecision(turns: TranscriptTurn[]): SaveSuggest
       }
     }
   }
-  if (exemplars.length === 0) return detectOptionPick(turns);
+  if (exemplars.length === 0) return detectOptionPick(turns) ?? detectAnsweredQuestion(turns);
   return {
     heuristic: "architecture-decision",
     title: "decision finalized — save the chosen path and the why",
@@ -264,6 +264,38 @@ function detectOptionPick(turns: TranscriptTurn[]): SaveSuggestion | null {
     type: "decision",
     body: `The user picked one of the offered options (language-neutral signal): ${picks.slice(0, 2).map((c) => c.slice(0, 160)).join(" | ")}. ` +
       `If an architectural choice was committed (X over Y, the trade-off), save a 'decision' memory ` +
+      `with the why + how-to-apply.`,
+  };
+}
+
+/** Claude Code's AskUserQuestion tool. Its answer comes back as a tool result,
+ *  which the prose heuristics skip on purpose — yet it is the most explicit
+ *  decision a user makes: a question the agent laid out, answered in place. */
+const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
+/** The answer shape Claude Code writes for every language and version seen:
+ *  `"<question>"="<answer>"`. A denied or failed call carries no such pair. */
+const ANSWER_PAIR_RE = /"[^"\n]{1,500}"="[^"\n]{1,500}"/u;
+
+/** Language-neutral, like detectOptionPick: the user answered a structured
+ *  question the agent asked with AskUserQuestion. */
+function detectAnsweredQuestion(turns: TranscriptTurn[]): SaveSuggestion | null {
+  const window = turns.slice(-DECISION_WINDOW_TURNS * 3);
+  const answers: string[] = [];
+  for (let i = 0; i < window.length - 1; i++) {
+    const t = window[i];
+    if (t.role !== "assistant" || !(t.tools ?? []).includes(ASK_USER_QUESTION_TOOL)) continue;
+    const result = window.slice(i + 1).find((r) => r.role !== "assistant");
+    if (!result || result.role !== "tool") continue;
+    const pair = ANSWER_PAIR_RE.exec(result.content);
+    if (pair) answers.push(pair[0]);
+  }
+  if (answers.length === 0) return null;
+  return {
+    heuristic: "architecture-decision",
+    title: "decision finalized — save the chosen path and the why",
+    type: "decision",
+    body: `The user answered a question the agent asked (AskUserQuestion, language-neutral signal): ${answers.slice(-2).map((a) => a.slice(0, 160)).join(" | ")}. ` +
+      `If this settled a choice that outlives the session (X over Y, the trade-off, a standing rule), save a 'decision' memory ` +
       `with the why + how-to-apply.`,
   };
 }
