@@ -34,6 +34,8 @@ export const INJECTED_BLOCK_TAGS = [
   "pending-save-suggestions",
   "bastra-product-docs",
   "save-eval",
+  "save-eval-now",
+  "session-harvest",
   "taxonomy-drift",
   // Claude Code harness injections
   "system-reminder",

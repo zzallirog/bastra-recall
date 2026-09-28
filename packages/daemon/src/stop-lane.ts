@@ -315,7 +315,7 @@ async function takeSameTurnSuggestions(
   return fresh;
 }
 
-function formatSameTurnBlock(suggestions: SaveSuggestion[]): string {
+export function formatSameTurnBlock(suggestions: SaveSuggestion[]): string {
   return [
     `<save-eval-now source="stop-hook">`,
     `bastra-recall found a save-worthy moment in THIS conversation. Judge it from the conversation; ` +
