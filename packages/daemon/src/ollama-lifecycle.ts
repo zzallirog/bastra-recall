@@ -20,17 +20,40 @@
  * Alle Calls best-effort: werfen nie, loggen nur.
  */
 
-/** Modell sofort entladen (Idle). true = unload akzeptiert. */
+/**
+ * Ist `model` gerade resident? Best-effort — ein Fehler heißt "unbekannt",
+ * nicht "nein", damit ein /api/ps-Ausfall den Unload nicht fälschlich
+ * auf "war eh nicht geladen" umbiegt.
+ */
+async function isModelResident(base: string, model: string): Promise<boolean | null> {
+  try {
+    const resp = await fetchGetWithTimeout(`${base}/api/ps`, 5_000);
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as { models?: { model?: string; name?: string }[] };
+    return (data.models ?? []).some((m) => m.model === model || m.name === model);
+  } catch {
+    return null;
+  }
+}
+
+/** Modell sofort entladen (Idle). true = unload akzeptiert (auch: war schon nicht resident). */
 export async function unloadOllamaModel(baseURL: string, model: string): Promise<boolean> {
   const base = baseURL.replace(/\/+$/, "");
+  // #L01: nicht resident → nichts zu entladen. Ohne diese Prüfung lädt der
+  // Unload-Request selbst ein kaltes Modell (14–16 s), weil /api/embed mit
+  // leerem Input trotzdem eine echte Inferenz ist und das Modell dafür erst
+  // lädt — der Idle-Befehl kehrt den Energie-Zweck dann um.
+  const resident = await isModelResident(base, model);
+  if (resident === false) {
+    console.error(`[bastra-recall] ollama idle-unload: ${model} was not resident — nothing to do`);
+    return true;
+  }
   try {
-    // Primär: /api/embed mit leerem Input + keep_alive:0. Fallback auf
-    // /api/generate (der historisch dokumentierte Unload-Weg), falls eine
-    // Ollama-Version den leeren Embed-Input ablehnt.
-    let resp = await fetchWithTimeout(`${base}/api/embed`, { model, input: "", keep_alive: 0 }, 10_000);
-    if (!resp.ok) {
-      resp = await fetchWithTimeout(`${base}/api/generate`, { model, keep_alive: 0 }, 10_000);
-    }
+    // /api/generate ohne `prompt` ist der dokumentierte reine Unload-Weg:
+    // keep_alive:0 ohne Prompt entlädt, ohne eine Inferenz anzustoßen.
+    // /api/embed mit leerem Input tut das NICHT — der leere Input ist
+    // trotzdem ein echter Embed-Aufruf und lädt ein kaltes Modell erst.
+    const resp = await fetchWithTimeout(`${base}/api/generate`, { model, keep_alive: 0 }, 10_000);
     if (resp.ok) {
       console.error(`[bastra-recall] ollama idle-unload: ${model} released (~RAM freed; next embed reloads it)`);
       return true;
@@ -40,6 +63,16 @@ export async function unloadOllamaModel(baseURL: string, model: string): Promise
   } catch (err) {
     console.error(`[bastra-recall] ollama idle-unload failed: ${(err as Error).message}`);
     return false;
+  }
+}
+
+async function fetchGetWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { method: "GET", signal: ctrl.signal });
+  } finally {
+    clearTimeout(tid);
   }
 }
 
