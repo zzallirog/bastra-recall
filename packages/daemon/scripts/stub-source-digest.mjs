@@ -36,7 +36,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -87,13 +87,41 @@ export function statuslineBundleDigest() {
   }
 }
 
-/** Every `import ... from "…"` / `import("…")` specifier in a source file. */
+/** Every `import ... from "…"` / `import "…"` / `import("…")` specifier in a
+ *  source file — the bare side-effect form loads a module too. */
 function specifiersOf(source) {
   const found = [];
-  const re = /\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  const re = /\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)|\bimport\s*["']([^"']+)["']/g;
   let m;
-  while ((m = re.exec(source)) !== null) found.push(m[1] ?? m[2]);
+  while ((m = re.exec(source)) !== null) found.push(m[1] ?? m[2] ?? m[3]);
   return found;
+}
+
+function isFile(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The file a relative specifier loads. `build-stub.mjs` compiles with
+ * `--sloppy-imports`, so deno also accepts an extensionless specifier and a
+ * directory (its index) — resolving only the literal path would leave those
+ * modules out of the digest while they are in the binary. Nothing found: the
+ * literal path, which the caller drops as unreadable.
+ */
+function resolveSpecifier(fromFile, spec) {
+  const literal = resolve(dirname(fromFile), spec.replace(/\.js$/, ".ts"));
+  const base = resolve(dirname(fromFile), spec);
+  const candidates = [
+    literal,
+    base,
+    ...[".ts", ".tsx", ".js", ".mjs"].map((ext) => base + ext),
+    ...[".ts", ".tsx", ".js", ".mjs"].map((ext) => resolve(base, "index" + ext)),
+  ];
+  return candidates.find(isFile) ?? literal;
 }
 
 /**
@@ -119,7 +147,7 @@ export function stubSourceFiles() {
     seen.add(file);
     for (const spec of specifiersOf(source)) {
       if (!spec.startsWith(".")) continue; // node:, npm:, bare — not our sources
-      const abs = resolve(dirname(file), spec.replace(/\.js$/, ".ts"));
+      const abs = resolveSpecifier(file, spec);
       if (abs === STUB_BUILD_INFO) continue; // the stamp cannot contain itself
       if (relative(PACKAGE_ROOT, abs).startsWith("..")) continue; // outside the package
       queue.push(abs);
