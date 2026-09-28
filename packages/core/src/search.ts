@@ -662,8 +662,17 @@ export class SearchIndex {
 
   /** Optionalen Embedding-Index registrieren — recallHybrid nutzt ihn,
    *  recall (sync) bleibt BM25-only für Backwards-Compat. */
+  private embedFn: ((texts: string[]) => Promise<Float32Array[]>) | null = null;
+
+  /** The embedding provider as a plain text embedder, or null without one.
+   *  One function per index, so callers can cache per embedder. */
+  embedder(): ((texts: string[]) => Promise<Float32Array[]>) | null {
+    return this.embedFn;
+  }
+
   useEmbeddings(idx: EmbeddingIndex | undefined): void {
     this.embeddings = idx;
+    this.embedFn = idx ? (texts) => idx.embedTexts(texts) : null;
   }
 
   hasEmbeddings(): boolean {

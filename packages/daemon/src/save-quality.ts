@@ -15,6 +15,7 @@ import {
   SaveMemoryInput,
   containsInjectedBlock,
   scanForInjection,
+  scanForInjectionSemantic,
   formatInjectionAdvisory,
   scopeEquals,
 } from "@bastra-recall/core";
@@ -278,9 +279,7 @@ export function scoreSaveQuality(
   const injectionAdvisory = formatInjectionAdvisory(injectionFindings);
   if (injectionAdvisory) {
     issues.push(injectionAdvisory);
-    suggestions.push(
-      "review the flagged spans — quoted third-party material keeps the flag as provenance; if it is your own phrasing, reword it",
-    );
+    suggestions.push(INJECTION_REVIEW_HINT);
     score -= 15;
   }
 
@@ -439,5 +438,51 @@ export function scoreSaveQuality(
     suggestions: Array.from(new Set(suggestions)),
     duplicate_candidates: duplicateCandidates,
     trigger_collisions: triggerCollisions,
+  };
+}
+
+/** A save is no hot path, but the meaning pass must not wait on a cold model
+ *  indefinitely: past this, the structural verdict stands alone. */
+const SEMANTIC_INJECTION_BUDGET_MS = 3000;
+const INJECTION_REVIEW_HINT =
+  "review the flagged spans — quoted third-party material keeps the flag as provenance; if it is your own phrasing, reword it";
+
+/**
+ * S14: the meaning half of the injection scan (core injection-scan.ts), run
+ * after `scoreSaveQuality` when the vault has an embedding model. The
+ * structural pass there knows no words; this one compares the save's clauses
+ * with exemplar instructions, in whatever language the save is written.
+ * Returns the report with the advisory added — only when the structural pass
+ * found nothing, one advisory per save. Without embeddings, or past the
+ * budget, the report comes back unchanged.
+ */
+export async function withSemanticInjection(
+  deps: ToolDeps,
+  input: Pick<SaveMemoryInput, "title" | "summary" | "body">,
+  quality: SaveQualityResult,
+): Promise<SaveQualityResult> {
+  const embed = deps.search.embedder();
+  if (!embed) return quality;
+  if (quality.issues.some((i) => i.startsWith("possible prompt-injection markers"))) return quality;
+  let timer: NodeJS.Timeout | undefined;
+  const findings = await Promise.race([
+    scanForInjectionSemantic([input.title, input.summary, input.body].join("\n"), embed),
+    new Promise<[]>((resolve) => {
+      timer = setTimeout(() => resolve([]), SEMANTIC_INJECTION_BUDGET_MS);
+      timer.unref?.();
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  const advisory = formatInjectionAdvisory(findings);
+  if (!advisory) return quality;
+  const score = Math.max(0, quality.score - 15);
+  return {
+    ...quality,
+    score,
+    band: score >= 80 ? "high" : score >= 50 ? "medium" : "low",
+    issues: [...quality.issues, advisory],
+    suggestions: quality.suggestions.includes(INJECTION_REVIEW_HINT)
+      ? quality.suggestions
+      : [...quality.suggestions, INJECTION_REVIEW_HINT],
   };
 }

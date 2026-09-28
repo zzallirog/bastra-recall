@@ -254,6 +254,9 @@ export type { RelatedEnricherOptions } from "./related-enrich.js";
 export { TriggerExpander, buildExpandPrompt, buildInflectPrompt, parseExpansions, sourceHash } from "./trigger-expand.js";
 export {
   scanForInjection,
+  scanForInjectionSemantic,
+  INJECTION_SEMANTIC_MIN,
+  type EmbedTexts,
   injectionCategories,
   formatInjectionAdvisory,
   MAX_FINDINGS as INJECTION_MAX_FINDINGS,

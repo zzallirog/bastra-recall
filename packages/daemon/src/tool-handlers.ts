@@ -35,7 +35,7 @@ import { tokens as words } from "./save-similarity.js";
 import type { ToolDeps } from "./tool-deps.js";
 import { hiddenFromCaller, hiddenOnDisk, type PrivateAccess } from "./private-access.js";
 import { vaultLocator } from "./vault-locator.js";
-import { scoreSaveQuality, type SaveQualityResult } from "./save-quality.js";
+import { scoreSaveQuality, withSemanticInjection, type SaveQualityResult } from "./save-quality.js";
 import { isCommonTerm } from "./common-terms.js";
 import { MEMORY_TOOL_DEFS } from "./tool-defs-memory.js";
 import {
@@ -513,7 +513,13 @@ async function saveMemoryInner(
   const declaredReplaces = parsed.data.replaces
     ?? (parsed.data.overwrite ? asString(deps.vault.get(finalId)?.fm.replaces) : undefined);
 
-  const saveQuality = scoreSaveQuality(deps, parsed.data, finalId, supersededChain(declaredReplaces));
+  // S14: the injection scan's meaning pass needs the embedding model, so it
+  // runs here, async, on top of the synchronous report.
+  const saveQuality = await withSemanticInjection(
+    deps,
+    parsed.data,
+    scoreSaveQuality(deps, parsed.data, finalId, supersededChain(declaredReplaces)),
+  );
 
   // #360: the claim gate. A save whose recall_when fully contains an existing
   // memory's trigger declares a situation that memory already owns — that is a

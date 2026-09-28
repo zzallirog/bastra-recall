@@ -268,6 +268,22 @@ export class EmbeddingIndex {
    *   `error` — der Provider ist gescheitert. Keine Latenz, keine Residenz,
    *             kein Kaltstart.
    */
+  /**
+   * Embed arbitrary texts with this index's provider — for comparisons that
+   * are not a vault search (the injection scan's exemplars, S14). Provider
+   * health is booked like any call, so the breaker sees these failures too.
+   */
+  async embedTexts(texts: string[]): Promise<Float32Array[]> {
+    try {
+      const vectors = await this.provider.embed(texts);
+      this.markProviderOk();
+      return vectors;
+    } catch (err) {
+      this.markProviderError(err);
+      throw err;
+    }
+  }
+
   async searchDetailed(query: string, k: number = 10): Promise<VectorSearchOutcome> {
     const empty = (): VectorSearchOutcome => ({
       outcome: "empty",
