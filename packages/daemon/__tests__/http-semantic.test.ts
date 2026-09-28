@@ -53,7 +53,7 @@ const mkGraph = (nodeIds: string[], edges: Array<[string, string]>): VaultGraph 
 const vec = (values: number[]) => new Float32Array(values);
 const pair = (a: string, b: string) => (a < b ? `${a} ${b}` : `${b} ${a}`);
 
-test("buildSemanticLayout: positions, unwritten edges, missing vectors skipped", () => {
+test("buildSemanticLayout: positions, unwritten edges, missing vectors skipped", async () => {
   // two clean semantic clusters: n1/n2/n3 vs n4/n5; n6 has no vector
   const vectors = new Map<string, Float32Array>([
     ["n1", vec([1, 0.05, 0, 0])],
@@ -64,7 +64,7 @@ test("buildSemanticLayout: positions, unwritten edges, missing vectors skipped",
   ]);
   // n1–n2 is already written — it must NOT come back as a discovery
   const graph = mkGraph(["n1", "n2", "n3", "n4", "n5", "n6"], [["n1", "n2"]]);
-  const layout = buildSemanticLayout(graph, vectors);
+  const layout = await buildSemanticLayout(graph, vectors);
 
   assert.equal(layout.count, 5, "only embedded notes get a position");
   assert.equal(layout.dim, 4);
@@ -89,13 +89,13 @@ test("buildSemanticLayout: positions, unwritten edges, missing vectors skipped",
   );
 });
 
-test("buildSemanticLayout: empty and single-vector vaults don't blow up", () => {
-  const empty = buildSemanticLayout(mkGraph([], []), new Map());
+test("buildSemanticLayout: empty and single-vector vaults don't blow up", async () => {
+  const empty = await buildSemanticLayout(mkGraph([], []), new Map());
   assert.equal(empty.count, 0);
   assert.deepEqual(empty.positions, []);
   assert.deepEqual(empty.edges, []);
 
-  const one = buildSemanticLayout(
+  const one = await buildSemanticLayout(
     mkGraph(["solo"], []),
     new Map([["solo", vec([1, 0, 0, 0])]]),
   );

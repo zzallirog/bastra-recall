@@ -150,7 +150,7 @@ export function dispatchApiSurface(
       (async () => {
         if (!server.semanticCache || Date.now() - server.semanticCache.at > 60_000) {
           const skills = await listSkills();
-          server.semanticCache = { at: Date.now(), body: buildSemanticLayout(buildGraph(vault, skills), vecs) };
+          server.semanticCache = { at: Date.now(), body: await buildSemanticLayout(buildGraph(vault, skills), vecs) };
         }
         sendJson(res, 200, server.semanticCache.body);
       })().catch((err: Error) => sendJson(res, 500, { error: err.message }));
