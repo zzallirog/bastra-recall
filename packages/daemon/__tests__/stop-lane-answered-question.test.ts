@@ -4,9 +4,9 @@
  * The answer to Claude Code's AskUserQuestion comes back as a tool result, and
  * the prose heuristics skip tool results on purpose — so the most explicit
  * decision a user makes (a structured question, answered in place) never
- * suggested a save. On one owner's Arch transcripts: 55 answered questions,
+ * suggested a save. On one user's transcripts: 55 answered questions,
  * 0 of them visible to the lane; the decision cue lists never fire for a user
- * whose decisions are "да, удалить как просил".
+ * whose decisions are a short "да, удаляй".
  *
  * Revert-check: drop `?? detectAnsweredQuestion(turns)` in
  * detectArchitectureDecision → the three "fires" tests are red.
@@ -17,7 +17,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { evaluateHeuristics, parseTranscriptFile } from "../src/stop-lane.js";
 
-function transcript(answer: { text: string; isError?: boolean }, userAsk = "почисти профили на вольте"): string {
+function transcript(answer: { text: string; isError?: boolean }, userAsk = "почисти кэш сборки"): string {
   const rows = [
     { type: "user", message: { role: "user", content: userAsk } },
     {
@@ -26,7 +26,7 @@ function transcript(answer: { text: string; isError?: boolean }, userAsk = "по
         role: "assistant",
         content: [
           { type: "text", text: "Перед удалением один вопрос." },
-          { type: "tool_use", id: "toolu_1", name: "AskUserQuestion", input: { questions: [{ question: "Удалять ли zen-профиль?" }] } },
+          { type: "tool_use", id: "toolu_1", name: "AskUserQuestion", input: { questions: [{ question: "Удалить ли старый кэш сборки?" }] } },
         ],
       },
     },
@@ -47,10 +47,10 @@ const decision = (raw: string) =>
 
 test("an answered AskUserQuestion fires the decision heuristic (Russian answer, current result shape)", () => {
   const s = decision(transcript({
-    text: 'Your questions have been answered: "Удалять ли zen-профиль?"="Да, удалить как просил". You can now continue with these answers in mind.',
+    text: 'Your questions have been answered: "Удалить ли старый кэш сборки?"="Да, удалить". You can now continue with these answers in mind.',
   }));
   assert.ok(s, "a decision suggestion");
-  assert.match(s.body, /Да, удалить как просил/);
+  assert.match(s.body, /Да, удалить/);
 });
 
 test("an answered AskUserQuestion fires in any language and the older result shape", () => {
