@@ -611,10 +611,31 @@ async function main(): Promise<void> {
   if (para) passes.push(para.pass);
   if (cross) passes.push(cross.pass);
   if (anti) passes.push(anti.pass);
+
+  // #M5-16: the two baselines above were computed and printed but never
+  // consulted for the verdict — a harness whose label-shuffle null scores as
+  // well as the measured run is (by the file's own doc comment) "measuring
+  // the gold set's shape, not retrieval", and used to still print PASS.
+  const baselineFailures: string[] = [];
+  if (para && nullPara && nullPara.recallAt3 >= para.recallAt3) {
+    baselineFailures.push(
+      `paraphrased: label-shuffle null (${pct(nullPara.recallAt3)}) is not below measured (${pct(para.recallAt3)})`,
+    );
+  }
+  if (cross && nullCross && nullCross.recallAtK >= cross.recallAtK) {
+    baselineFailures.push(
+      `cross: label-shuffle null (${pct(nullCross.recallAtK)}) is not below measured (${pct(cross.recallAtK)})`,
+    );
+  }
+  if (baselineFailures.length > 0) passes.push(false);
+
   const allPass = passes.length > 0 && passes.every((p) => p);
 
   console.log("\n## Overall\n");
   console.log(`Verdict: **${allPass ? "PASS" : "FAIL"}**`);
+  for (const f of baselineFailures) {
+    console.log(`  baseline gate failed — ${f} — the null baseline is scoring as well as retrieval`);
+  }
 
   // ── JSON export ───────────────────────────────────────────
   if (args.out) {

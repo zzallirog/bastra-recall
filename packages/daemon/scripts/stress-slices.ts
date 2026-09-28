@@ -342,7 +342,11 @@ export async function runCrossMemory(
     passed,
     rows,
     recallAtK,
-    pass: passed === rows.length,
+    // #M5-16: every case retired leaves rows.length === 0, and
+    // `passed === rows.length` reads `0 === 0` as PASS — the retirement
+    // record was meant to be score-neutral, not to make the slice pass by
+    // having nothing left to grade.
+    pass: rows.length > 0 && passed === rows.length,
     unknownIds,
     retiredIds,
   };
