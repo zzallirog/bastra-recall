@@ -98,6 +98,14 @@ const GENERIC_TERMS = new Set([
   "going", "know", "think", "sure", "done", "right", "still", "again",
   "today", "first", "next", "last", "take", "look", "check", "help", "each",
   "every", "much", "many", "most", "such", "same",
+  // ru (F09): the same filler the de/en lists drop — a trigger names a topic,
+  // not a sentence shape.
+  "пожалуйста", "сейчас", "сделай", "сделать", "можно", "нужно", "надо", "давай",
+  "только", "теперь", "потом", "когда", "чтобы", "который", "которая", "которые",
+  "этого", "этому", "этой", "этот", "эти", "такой", "очень", "просто", "снова",
+  "опять", "тоже", "также", "если", "есть", "было", "будет", "хочу", "хотим",
+  "смотри", "посмотри", "проверь", "привет", "спасибо", "ладно", "окей", "всего",
+  "здесь", "сегодня", "вчера", "завтра", "ещё", "еще",
 ]);
 
 /** Extract deduped distinctive terms from a free-text string. */
@@ -140,12 +148,26 @@ export function isMachineVocabulary(terms: string[]): boolean {
  *  Turkish "şifresi" to "ifresi". */
 const TERM_SPLIT_RE = /[^\p{L}\p{M}\p{N}]+/u;
 
+/**
+ * Spellings of one word that must meet at mint and at query time (F09): NFC
+ * (a decomposed "й" is и + U+0306), Turkish "İ" lowercasing to i + U+0307, and
+ * the Cyrillic apostrophe (U+02BC or ASCII, "обʼєкт"/"об'єкт") that would
+ * otherwise split a word into fragments under the length floor.
+ */
+function foldForTerms(text: string): string {
+  return text
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/i\u0307/g, "i")
+    .replace(/(?<=\p{Script=Cyrillic})['’ʼ‘`](?=\p{Script=Cyrillic})/gu, "");
+}
+
 export function distinctiveTerms(text: string): string[] {
   const seen = new Set<string>();
   // Runs in scripts written without spaces (Japanese, Chinese, Thai) are one
   // sentence after the split — `segmentWords` cuts them into ICU words, whose
   // two-character content words `isSignificantLength` keeps.
-  for (const raw of text.toLowerCase().split(TERM_SPLIT_RE).flatMap(segmentWords)) {
+  for (const raw of foldForTerms(text).split(TERM_SPLIT_RE).flatMap(segmentWords)) {
     if (!isSignificantLength(raw, MIN_TERM_LEN)) continue;
     if (GENERIC_TERMS.has(raw)) continue;
     if (isEphemeralTerm(raw)) continue;
