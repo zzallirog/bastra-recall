@@ -162,6 +162,16 @@ async function main(): Promise<void> {
   );
   await vault.stop();
 
+  // #T03: with sample.length === 0 the `for (const row of sample)` loop
+  // below never runs for any voice, fs.writeFile is never called, and
+  // outPath is never created (or is left stale from a prior run) — yet
+  // "wrote <file>" printed unconditionally at the end read as success.
+  if (sample.length === 0) {
+    console.error(`FATAL: 0 eligible memories to sample (of ${admitted.length} admitted) — nothing to generate, ${outPath} not written`);
+    process.exitCode = 1;
+    return;
+  }
+
   const personas: Record<string, Record<string, string>> = {};
   let done = 0;
   let failed = 0;
