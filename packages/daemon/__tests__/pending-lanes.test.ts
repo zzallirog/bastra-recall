@@ -89,7 +89,7 @@ test("#513: N is configurable", async () => {
   );
 });
 
-test("#513: identical trends dedupe to one row with a refreshed counter", async () => {
+test("#513: identical trends dedupe to one row, and a refresh does not restart the counter", async () => {
   await withRelay(async () => {
     await writePendingSuggestion("<t>3 memories share tag a</t>", { lane: "trends", key: "drift" });
     await start("s-1");
@@ -99,7 +99,11 @@ test("#513: identical trends dedupe to one row with a refreshed counter", async 
     const r = await start("s-3");
     assert.equal(r.trends.length, 1, "never stacked");
     assert.match(r.trends[0].blocks, /4 memories/);
-    assert.equal(r.trends[0].sessions, 1, "the refresh restarted the counter");
+    // #F12: a refresh used to reset `sessions` to 0, so a STANDING trend
+    // (refreshed on every write, e.g. taxonomy-drift on every Stop) never
+    // reached the threshold that ages it out. The refresh here changes only
+    // the text; the counter keeps its progress from s-1/s-2 and s-3 advances it.
+    assert.equal(r.trends[0].sessions, 3, "the refresh kept the counter's progress");
 
     // Without a key the text itself is the identity.
     await writePendingSuggestion("<t>same</t>", { lane: "trends" });

@@ -153,12 +153,23 @@ export async function writePendingSuggestion(
         /* missing/corrupt → start fresh */
       }
       if (lane === "trends") {
-        // #513: one row per trend. A refresh replaces the text and restarts the
-        // session counter — the trend just came up again.
+        // #513: one row per trend. A refresh replaces the text, but the
+        // session counter keeps its progress (#F12) — restarting it here made
+        // a STANDING trend (still driving a refresh every time it is written,
+        // e.g. taxonomy-drift on every Stop) never age out: the counter was
+        // reset to 0 before it could reach the threshold that ever drops it.
+        // Aging is takePendingRelay's job, once per real session start; a
+        // refresh only means "still current", not "clock restarts".
         const dup = entries.find(
           (e) => laneOf(e) === "trends" && (opts.key ? e.key === opts.key : e.blocks === capped),
         );
-        const row: PendingSuggestion = { ts: Date.now(), blocks: capped, lane: "trends", sessions: 0 };
+        const row: PendingSuggestion = {
+          ts: Date.now(),
+          blocks: capped,
+          lane: "trends",
+          sessions: dup?.sessions ?? 0,
+        };
+        if (dup?.last_session !== undefined) row.last_session = dup.last_session;
         if (opts.key) row.key = opts.key;
         if (dup) entries.splice(entries.indexOf(dup), 1);
         entries.push(row);
