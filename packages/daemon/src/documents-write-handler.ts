@@ -212,13 +212,18 @@ const DOCUMENTS_ROOT = "documents";
 const SLUG_MAX_LEN = 80;
 
 function slugify(input: string): string {
+  // Letters of any script survive (`\p{L}\p{N}`) so two Cyrillic/CJK
+  // filenames in one folder do not collapse onto one id (F15). NFC first: macOS
+  // hands out decomposed names, and a bare combining mark is not a letter.
+  // ASCII/umlaut names slug exactly as before, so existing doc ids hold.
   const slug = input
+    .normalize("NFC")
     .toLowerCase()
     .replace(/ä/g, "ae")
     .replace(/ö/g, "oe")
     .replace(/ü/g, "ue")
     .replace(/ß/g, "ss")
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, SLUG_MAX_LEN);
   if (!slug) throw new Error(`cannot slugify: ${JSON.stringify(input)}`);
