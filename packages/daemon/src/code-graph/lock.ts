@@ -285,13 +285,33 @@ async function nextGeneration(gens: string, _unused: null): Promise<number> {
   return max + 1;
 }
 
-/** True when this process, and only this process, won this turn's marker. */
-async function claimTurn(gens: string, name: string): Promise<boolean> {
+/**
+ * True when this process, and only this process, won this turn's marker.
+ *
+ * A marker can be claimed and never published: the winner dies (or `publish`
+ * loses a race and returns null) between `mkdir` succeeding here and the
+ * record landing at the lock path. Every later contender then reads the same
+ * stale predecessor record forever, computes the same next generation, and
+ * loses this `mkdir` to a marker nobody will ever fill — the repository is
+ * wedged for good. A marker older than `staleMs` is abandoned by the same
+ * definition the lock record itself uses ({@link LOCK_STALE_MS}): remove it
+ * and claim once more, so the chain has a predecessor to move on from.
+ */
+async function claimTurn(gens: string, name: string, staleMs = LOCK_STALE_MS): Promise<boolean> {
+  const marker = join(gens, name);
   try {
-    await mkdir(join(gens, name));
+    await mkdir(marker);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") return false;
+    if (await isYoungerThan(marker, staleMs)) return false;
+    try {
+      await rm(marker, { recursive: true, force: true });
+      await mkdir(marker);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
