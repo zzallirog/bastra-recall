@@ -31,7 +31,7 @@
 
 import { existsSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { Vault, SearchIndex } from "@bastra-recall/core";
+import { Vault, SearchIndex, RRF_K, RRF_SCALE } from "@bastra-recall/core";
 import { attachHybrid, makeControlRecaller, makeRecaller, type HybridArm } from "./stress-arm.js";
 import {
   runParaphrased,
@@ -541,6 +541,14 @@ async function main(): Promise<void> {
   const anti = args.slices.includes("anti")
     ? await runAntiHallucination(vault, recall, args.cutoff)
     : undefined;
+  // #M5-05: core/src/search.ts — "a one-armed rank-1 hit scores
+  // RRF_SCALE/(RRF_K+1) by construction" — the dense arm has no similarity
+  // floor, so under --hybrid every query returns a rank-1 neighbour at or
+  // above this score. The cutoff lives in BM25 units; when it sits below
+  // this floor the anti-hallucination slice cannot pass under --hybrid no
+  // matter how good retrieval is, so it does not gate the verdict there.
+  const rrfOneArmedFloor = RRF_SCALE / (RRF_K + 1);
+  const antiNotEvaluableUnderHybrid = args.hybrid && args.cutoff <= rrfOneArmedFloor;
 
   // #261: two baselines, without which the numbers above have no scale.
   //
@@ -601,6 +609,13 @@ async function main(): Promise<void> {
     // so a shuffle has nothing to shuffle. Said out loud rather than left as a
     // blank the reader has to interpret.
     console.log(`| anti-hallucination | median ${anti.median.toFixed(1)} | n/a | n/a — no gold labels to permute |`);
+    if (antiNotEvaluableUnderHybrid) {
+      console.log(
+        `  not evaluable under --hybrid: cutoff ${args.cutoff} is at or below the RRF one-armed floor ` +
+          `${rrfOneArmedFloor.toFixed(3)} — every hybrid hit scores at least that by construction, so this ` +
+          `slice cannot pass regardless of retrieval quality and does not gate the verdict here.`,
+      );
+    }
   }
 
   // M0 gate: "keine unbekannten Gold-IDs". Not a warning — a fixture pointing
@@ -610,7 +625,7 @@ async function main(): Promise<void> {
   if (unknownGold.length > 0) passes.push(false);
   if (para) passes.push(para.pass);
   if (cross) passes.push(cross.pass);
-  if (anti) passes.push(anti.pass);
+  if (anti && !antiNotEvaluableUnderHybrid) passes.push(anti.pass);
 
   // #M5-16: the two baselines above were computed and printed but never
   // consulted for the verdict — a harness whose label-shuffle null scores as
@@ -630,9 +645,10 @@ async function main(): Promise<void> {
   if (baselineFailures.length > 0) passes.push(false);
 
   const allPass = passes.length > 0 && passes.every((p) => p);
+  const nothingEvaluable = passes.length === 0 && anti !== undefined && antiNotEvaluableUnderHybrid;
 
   console.log("\n## Overall\n");
-  console.log(`Verdict: **${allPass ? "PASS" : "FAIL"}**`);
+  console.log(`Verdict: **${nothingEvaluable ? "NOT EVALUABLE" : allPass ? "PASS" : "FAIL"}**`);
   for (const f of baselineFailures) {
     console.log(`  baseline gate failed — ${f} — the null baseline is scoring as well as retrieval`);
   }
