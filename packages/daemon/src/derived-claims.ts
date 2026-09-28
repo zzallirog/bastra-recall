@@ -80,14 +80,21 @@ async function resolveClaim(vaultRoot: string, claim: DerivedClaim): Promise<Der
   }
   const text = bytes.toString("utf8");
   if (claim.resolver === "quote.v1") {
-    const value = occurrences(text, claim.exact ?? "");
+    // Same characters, not same code units: a quote typed in NFC stands in a
+    // file saved in NFD ("й", Japanese voiced kana — the macOS default for
+    // copied text), and a line break is one whether the file says \r\n or \n.
+    const value = occurrences(asQuotable(text), asQuotable(claim.exact ?? ""));
     return { ...base, value, status: value === 1 ? "matches" : value === 0 ? "gone" : "ambiguous" };
   }
   const value = countMarkdownNumberedList(text);
+  // YAML `expect: "5"` is a string; the count is a number. A hand-quoted
+  // digit string must not read as a permanent `differs`.
+  const expected =
+    typeof claim.expect === "string" && /^\s*\d+\s*$/.test(claim.expect) ? Number(claim.expect) : claim.expect;
   return {
     ...base,
     value,
-    status: claim.expect === undefined ? "observed" : value === claim.expect ? "matches" : "differs",
+    status: expected === undefined ? "observed" : value === expected ? "matches" : "differs",
   };
 }
 
@@ -125,6 +132,24 @@ function occurrences(text: string, needle: string): number {
   return needle === "" ? 0 : text.split(needle).length - 1;
 }
 
+/** Canonical composition and one line-break form, on both sides of a quote. */
+function asQuotable(s: string): string {
+  return s.normalize("NFC").replace(/\r\n?/g, "\n");
+}
+
+/** Numbered list items outside fenced code blocks — a numbered line inside
+ *  ``` or ~~~ is code (a pasted log, a script), not an item of the list. */
 function countMarkdownNumberedList(text: string): number {
-  return text.split(/\r?\n/).filter((line) => /^\s*\d+[.)]\s+/.test(line)).length;
+  let fence: string | null = null;
+  let n = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const f = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (f) {
+      if (fence === null) fence = f[1][0];
+      else if (f[1][0] === fence) fence = null;
+      continue;
+    }
+    if (fence === null && /^\s*\d+[.)]\s+/.test(line)) n++;
+  }
+  return n;
 }

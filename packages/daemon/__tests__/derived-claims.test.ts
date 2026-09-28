@@ -392,3 +392,42 @@ test("#609: doctor's derived-claims note is silent without claims and lists the 
     await cleanup();
   }
 });
+
+// Revert-check: drop asQuotable in resolveClaim → the NFD and CRLF quotes are
+// `gone`; drop the fence tracking → the count is 5; compare the raw string
+// expect → `differs`.
+test("#609 audit: a quote matches its canonical-equivalent and CRLF spellings", async () => {
+  const { deps, cleanup } = await makeDeps();
+  try {
+    await plantSource(deps, "ops/nfd.md", "Пойдём в арку\r\nвторая строка\r\n".normalize("NFD"));
+    const nfc = { id: "nfc", resolver: "quote.v1", source: "ops/nfd.md", exact: "Пойдём в арку" };
+    const crlf = { id: "crlf", resolver: "quote.v1", source: "ops/nfd.md", exact: "арку\nвторая" };
+    const { claims } = await statusesFor(deps, [nfc, crlf]);
+    assert.deepEqual(claims.map((c) => c.status), ["matches", "matches"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("#609 audit: numbered lines inside a code fence are not list items", async () => {
+  const { deps, cleanup } = await makeDeps();
+  try {
+    await plantSource(deps, "ops/list.md", "1. one\n2. two\n3. three\n\n```\n1. log line\n2. log line\n```\n");
+    const { claims } = await statusesFor(deps, [{ id: "items", resolver: "count.markdown-numbered-list.v1", source: "ops/list.md", expect: 3 }]);
+    assert.equal(claims[0]?.value, 3);
+    assert.equal(claims[0]?.status, "matches");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("#609 audit: a count expect written as a quoted digit string still compares", async () => {
+  const { deps, cleanup } = await makeDeps();
+  try {
+    await plantSource(deps, "ops/list.md", "1. one\n2. two\n");
+    const { claims } = await statusesFor(deps, [{ id: "items", resolver: "count.markdown-numbered-list.v1", source: "ops/list.md", expect: "2" }]);
+    assert.equal(claims[0]?.status, "matches");
+  } finally {
+    await cleanup();
+  }
+});
