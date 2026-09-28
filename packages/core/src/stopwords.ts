@@ -72,6 +72,12 @@ export const FUNCTION_WORDS_BY_LANGUAGE: Readonly<Record<string, readonly string
     "noch", "nur", "oder", "sich", "sind", "soll", "und", "von", "vor", "war",
     "waren", "wenn", "werden", "wie", "wird", "zu", "zum", "zur", "über",
   ],
+  ru: [
+    "без", "был", "была", "были", "было", "быть", "вот", "все", "где", "для",
+    "его", "если", "есть", "еще", "или", "как", "когда", "кто", "мне", "может",
+    "надо", "нас", "него", "нет", "они", "при", "про", "так", "там", "тем",
+    "то", "только", "уже", "что", "чтобы", "это", "этот", "эти", "эту",
+  ],
 };
 
 export const FUNCTION_WORDS: ReadonlySet<string> = new Set(Object.values(FUNCTION_WORDS_BY_LANGUAGE).flat());
