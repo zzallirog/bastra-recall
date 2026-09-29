@@ -4,7 +4,7 @@
  * per-mode score floor and prompt extraction from the hook payload. Pure and
  * deterministic; runs before any recall work.
  */
-import { isSignificantLength } from "@bastra-recall/core";
+import { isQuestion, isSignificantLength } from "@bastra-recall/core";
 
 export const SCORE_FLOOR = 50; // higher than PreToolUse: prompts rarely match recall_when exactly
 export const MUST_LOAD_SCORE = 100;
@@ -29,24 +29,10 @@ export type DetectedMode = "retrieval" | "assertion" | "none" | "generic";
 // script — ? ？ ؟ ; (Greek) ፧ ՞ ‽, or opened by the Spanish ¿ — is an
 // explicit ask; an imperative lookup ("find the lease") without one is
 // score-gated like any prompt (#677), in every language alike.
-/** A question mark that ends a clause: after a letter, digit or closing
- *  quote/bracket, and followed by whitespace, "!", another question mark, a
- *  closing quote/bracket or the end — not the `?` of `a?.b` or a URL query.
- *  French typography puts a space before it ("c'est quoi ?"); then only the
- *  end of the clause may follow, so `x ?? y` stays code. */
-const QUESTION_END_RE =
-  /[\p{L}\p{M}\p{N}"'»”’)\]}」』](?:[?？؟\u037e፧‽⁇⁈⁉](?=[\s?？!！"'»”’)」』*_`]|$)|[\u0020\u00a0\u202f][?？؟\u037e፧‽⁇⁈⁉](?=[!！]*(?:\s|$)))/u;
-/** Greek writes its question mark as the semicolon key: a ";" after a Greek
- *  word at the end of a line. Anywhere else ";" is a semicolon. */
-const GREEK_QUESTION_RE = /\p{Script=Greek}\p{M}*;[ \t]*(?:\n|$)/u;
-/** A question opened explicitly: Spanish ¿, and the Armenian question mark,
- *  which sits inside the word it questions. */
-const QUESTION_OPEN_RE = /[¿՞]/u;
-
 export function detectRetrieval(prompt: string): boolean {
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return false;
-  return QUESTION_END_RE.test(trimmed) || GREEK_QUESTION_RE.test(trimmed) || QUESTION_OPEN_RE.test(trimmed);
+  return isQuestion(trimmed);
 }
 
 // ─── assertion lane (#252) ───────────────────────────────────────────────────

@@ -44,16 +44,19 @@ export function evaluateHeuristics(turns: TranscriptTurn[], deps: HeuristicDeps 
   return suggestions;
 }
 
-// Explicit frustration words, per language (#476) — the list is DATA now, in
-// lexicon.ts (shipped defaults + a user-editable file), not a `const` here.
-// The regex is rebuilt per detection so an edit to the lexicon file takes
-// effect on the next session without a restart; the list is tiny.
+// Explicit frustration words (#476) are optional USER data in lexicon.ts — a
+// user-editable file, nothing shipped: the language-neutral restatement check
+// below is the signal every language gets. With no file there is no cue and
+// the density path is skipped. The regex is rebuilt per detection so an edit
+// to the file takes effect on the next session without a restart.
 //
 // `\b` is unusable here: JS word boundaries are defined over [A-Za-z0-9_], so
 // `\bснова\b` never matches and `\bÄRGER\b` matches in the wrong places. The
 // Unicode letter lookarounds below are the same idea, correct for every script.
-function frustWordRe(): RegExp {
-  return new RegExp(`(?<!\\p{L})(?:${frustrationCues().join("|")})(?!\\p{L})`, "giu");
+function frustWordRe(): RegExp | null {
+  const cues = frustrationCues();
+  if (cues.length === 0) return null;
+  return new RegExp(`(?<!\\p{L})(?:${cues.join("|")})(?!\\p{L})`, "giu");
 }
 // Letter runs in any script (Latin incl. Umlauts, Cyrillic, …) and all-caps
 // tokens by Unicode case, not by Latin alphabet.
@@ -68,7 +71,17 @@ const CAPS_STOPLIST = new Set([
   "SVG", "PNG", "PDF", "JPG", "TODO", "FIXME",
 ]);
 
-function countFrustWords(content: string, re: RegExp): number {
+// Exclamation as emphasis, in every script that writes one: `!`, fullwidth
+// `！`, `‼`, `❗`, the Spanish opening `¡`, Armenian `՜` — not the `!` of `!=`,
+// `!==`, `!cmd` or `!important`.
+const EMPHASIS_BANG_RE = /!(?![=~\p{L}\p{N}_/.-])|[！‼❗❕¡՜⁉⁈]/u;
+// Emphasis a single restatement needs: the mark doubled ("!!", "！！", "?!"),
+// or `‼`/`⁉`. One "!" is punctuation; two on a repeated request is a raised
+// voice in any language.
+const STRONG_EMPHASIS_RE = /[!！❗¡]{2,}|[?？][!！]|[!！][?？]|[‼⁉⁈]/u;
+
+function countFrustWords(content: string, re: RegExp | null): number {
+  if (!re) return 0;
   const m = content.match(re);
   return m ? m.length : 0;
 }
@@ -125,13 +138,19 @@ export function detectFrustration(turns: TranscriptTurn[]): SaveSuggestion | nul
   };
 }
 
-/** #678 language-neutral fallback: >=2 user turns restate an earlier one
- *  (stop-lane-repeat.ts) and at least one restatement carries emphasis —
- *  `!`/`！` or a qualifying CAPS token. No word list, so any language fires. */
+/** #678 language-neutral signal — the frustration signal of every language:
+ *  the user restates an earlier request (stop-lane-repeat.ts) with emphasis.
+ *  Two restatements need any emphasis (`!` in any script, a qualifying CAPS
+ *  token); one restatement needs a raised voice — the mark doubled ("!!",
+ *  "！！", "?!") or a CAPS token. No word list, so any language fires. */
 function detectRepeatedCorrection(userTurns: TranscriptTurn[]): SaveSuggestion | null {
   const repeats = restatementIndices(userTurns.map((t) => t.content)).map((i) => userTurns[i].content);
-  if (repeats.length < REPEAT_TURNS_MIN) return null;
-  if (!repeats.some((c) => /[!！]/u.test(c) || countQualifyingCaps(c) > 0)) return null;
+  if (repeats.length === 0) return null;
+  const emphatic =
+    repeats.length >= REPEAT_TURNS_MIN
+      ? repeats.some((c) => EMPHASIS_BANG_RE.test(c) || countQualifyingCaps(c) > 0)
+      : repeats.some((c) => STRONG_EMPHASIS_RE.test(c) || countQualifyingCaps(c) > 0);
+  if (!emphatic) return null;
   return {
     heuristic: "frustration-density",
     title: "recurring frustration — capture the underlying lesson",
@@ -223,8 +242,9 @@ export function detectFeatureCompletion(turns: TranscriptTurn[], deps: Heuristic
   };
 }
 
-// Decision cues (#476) are DATA in lexicon.ts (defaults + a user file), not a
-// `const` here — same story as frustration. Patterns rebuilt per detection.
+// Decision cues (#476) are optional USER data in lexicon.ts (nothing shipped) —
+// same story as frustration; the option pick and the answered question below
+// are the signals every language gets. Patterns rebuilt per detection.
 function decisionPatterns(): RegExp[] {
   return decisionCues().map((w) => new RegExp(`(?<!\\p{L})(?:${w})(?!\\p{L})`, "iu"));
 }

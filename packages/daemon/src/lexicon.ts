@@ -1,57 +1,33 @@
 /**
- * Cue lexicons for the stop-lane heuristics (#476) — data, not code.
+ * Cue lexicons for the stop-lane heuristics (#476) and the save-quality
+ * admission flags (#159, #707) — optional user data, not code, and not
+ * shipped.
  *
- * The frustration and decision cue lists used to be `const` arrays baked into
- * stop-lane.ts: adding a term — or a language — meant editing source and
- * cutting a release. They live here now as SHIPPED DEFAULTS plus an optional,
- * user-editable runtime file per lexicon. The defaults are always the floor;
- * the file EXTENDS them (it never has to restate a built-in). A missing or
- * malformed file falls back to defaults, so the Stop hook is never broken by
- * it. Every read hits the file fresh (see loadCues), so an edit takes effect on
- * the next Stop event with no daemon restart and no rebuild.
+ * The frustration and decision cues used to be word lists baked into the
+ * binary, later per language (de/en/ru, #678): a user writing in any other
+ * language never reached the explicit-word path, and the lists decided who
+ * got a save suggestion. The stop lane's own signals are language-neutral
+ * now — a restated request with emphasis (stop-lane-repeat.ts), a pick among
+ * the options the agent offered (stop-lane-choice.ts), an answered
+ * AskUserQuestion — and work in every language without a word from here.
+ *
+ * What stays is the file: a user who wants their own cue words ("ach nein",
+ * "разозлился", "decided") writes them, one per line, and they ADD to the
+ * neutral signals. Nothing is shipped, so every language starts equal.
+ * A missing or malformed file means no cues, never a broken Stop hook. Every
+ * read hits the file fresh (see loadCues), so an edit takes effect on the next
+ * Stop event with no daemon restart and no rebuild.
  *
  * File format: one cue per line, `#` starts a comment, blank lines ignored.
- * A cue is a regex fragment in the same dialect as the defaults; stop-heuristics.ts
- * wraps it with the Unicode letter-boundary lookarounds. This is the
- * write-target a future automatic harvester would populate — but the floor is
- * just: stop baking the lexicon into the binary.
+ * A cue is a regex fragment; stop-heuristics.ts wraps it with the Unicode
+ * letter-boundary lookarounds. Lines are NFC-normalized, so a cue typed on
+ * macOS (NFD) matches the same word in a prompt.
  *
  * Location: $BASTRA_LEXICON_DIR, else ~/.bastra/lexicon/<name>.txt.
  */
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-/**
- * Shipped cue lists keyed by ISO-639-1 code (#678) — a new language is one
- * entry here, no code change. Every shipped list stays active whatever
- * `language.primary` says: users mix languages (an English "again" in a German
- * session), and dropping a list on a settings change would silently lose cues.
- * A language WITHOUT a list is not left without a signal any more — the stop
- * lane's language-neutral checks cover it: a repeated correction for
- * frustration (#678), a pick among the agent's numbered options for a
- * decision (#707, stop-lane-choice.ts).
- * Within a list, longer variants first so the same span is not double-counted.
- */
-export const DEFAULT_FRUSTRATION_CUES_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  de: ["schon\\s+wieder", "wieder", "wie\\s+oft", "verdammt", "schei(?:ss|ß)e"],
-  en: ["yet\\s+again", "again", "how\\s+(?:often|many\\s+times)", "damn", "fuck", "shit"],
-  ru: ["снова", "опять", "сколько\\s+раз", "ч[её]рт", "бл(?:ин|ять)"],
-};
-
-export const DEFAULT_DECISION_CUES_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  de: ["ok\\s+dann", "lass\\s+uns", "entschieden", "gehen\\s+wir\\s+mit"],
-  en: [
-    "ok(?:ay)?\\s+then", "let['’]?s\\s+(?:go\\s+with|use)", "we(?:['’]ll|\\s+will)\\s+go\\s+with",
-    "decided", "settled\\s+on",
-  ],
-  ru: ["решено", "остановимся\\s+на", "договорились"],
-  // language-neutral
-  neutral: ["final"],
-};
-
-export const DEFAULT_FRUSTRATION_CUES: readonly string[] = Object.values(DEFAULT_FRUSTRATION_CUES_BY_LANGUAGE).flat();
-export const DEFAULT_DECISION_CUES: readonly string[] = Object.values(DEFAULT_DECISION_CUES_BY_LANGUAGE).flat();
 
 export function lexiconDir(): string {
   return process.env.BASTRA_LEXICON_DIR ?? join(homedir(), ".bastra", "lexicon");
@@ -66,8 +42,7 @@ const MAX_CUE_LENGTH = 200;
  * match the same text in more than one way — `(a+)+`, `((a+))+`, `(a{1,2})+`,
  * `(a|a)+`. Recognising the ambiguous bodies is a losing game (every narrower
  * guard here had a bypass), so a cue may not repeat a group at all: `)`
- * followed by `+`, `*` or `{` is rejected. `?` stays allowed (`ok(?:ay)?`), and
- * none of the shipped defaults repeat a group. Such a cue compiles fine, but it
+ * followed by `+`, `*` or `{` is rejected. `?` stays allowed (`ok(?:ay)?`). Such a cue compiles fine, but it
  * runs in the daemon on every Stop event: `(a+)+b` costs ~1 minute on a long
  * line and freezes the daemon for every session meanwhile. A repeated word is
  * still expressible without it (`haha+`, `ha(?:ha)?(?:ha)?`).
@@ -89,8 +64,7 @@ const RE_QUANTIFIED_GROUP = /\)[+*{]/;
  *
  * One exemption keeps multi-word cues writable: `\s+`/`\s*` directly between
  * two literal letters (`schon\s+wieder`) cannot overlap with its neighbours —
- * a letter is never whitespace — so it does not count. All shipped defaults
- * fit this budget.
+ * a letter is never whitespace — so it does not count.
  */
 const MAX_CUE_QUANTIFIERS = 2;
 
@@ -111,8 +85,9 @@ function tooManyQuantifiers(cue: string): boolean {
  * single invalid fragment would throw there — outside the Stop lane's try/catch
  * — and kill every heuristic. Validate each fragment in the SAME wrapped shape
  * both call sites compile (`(?<!\p{L})(?:…)(?!\p{L})`, `u`), and skip the bad
- * ones. This is what makes this module's "malformed → falls back to defaults"
- * guarantee actually hold for the malformation users will actually produce.
+ * ones. This is what makes this module's "malformed → no cue, never a broken
+ * hook" guarantee actually hold for the malformation users will actually
+ * produce.
  *
  * The fragment must ALSO compile on its own. The wrapped check alone lets an
  * unbalanced cue close the wrapper's group and reopen one (`a+)+(b` compiles
@@ -165,9 +140,9 @@ function readCapped(path: string, max: number): string {
 }
 
 /**
- * Defaults + the file's additions, deduped, defaults first. Never throws: any
- * fs or parse error falls back to the shipped defaults, and a regex-invalid
- * line is dropped (see isValidCue) rather than poisoning the set.
+ * The file's cues, deduped, in file order. Never throws: any fs or parse error
+ * means no cues, and a regex-invalid line is dropped (see isValidCue) rather
+ * than poisoning the set.
  *
  * Read fresh every call. The file is tiny and this runs ~twice per Stop event,
  * so a cache buys nothing worth its cost — and dropping it removes the whole
@@ -175,77 +150,62 @@ function readCapped(path: string, max: number): string {
  * same-millisecond staleness, no check-then-read (TOCTOU) race. An edit to the
  * file is simply picked up on the next read.
  */
-function loadCues(name: string, defaults: readonly string[]): string[] {
+function loadCues(name: string): string[] {
   const path = join(lexiconDir(), `${name}.txt`);
   try {
-    const extra = readCapped(path, MAX_LEXICON_BYTES)
+    const lines = readCapped(path, MAX_LEXICON_BYTES)
       .split("\n")
-      .map((line) => line.replace(/#.*$/, "").trim())
+      .map((line) => line.replace(/#.*$/, "").trim().normalize("NFC"))
       .filter((line) => line.length > 0);
-    const seen = new Set<string>(defaults);
-    const merged = [...defaults];
-    for (const e of extra) {
-      if (!seen.has(e) && isValidCue(e)) {
-        seen.add(e);
-        merged.push(e);
+    const seen = new Set<string>();
+    const cues: string[] = [];
+    for (const cue of lines) {
+      if (!seen.has(cue) && isValidCue(cue)) {
+        seen.add(cue);
+        cues.push(cue);
       }
     }
-    return merged;
+    return cues;
   } catch {
-    return [...defaults];
+    return [];
   }
 }
 
-/** Frustration cues: shipped defaults extended by ~/.bastra/lexicon/frustration.txt. */
+/** Frustration cues from ~/.bastra/lexicon/frustration.txt (none shipped). */
 export function frustrationCues(): string[] {
-  return loadCues("frustration", DEFAULT_FRUSTRATION_CUES);
+  return loadCues("frustration");
 }
 
-/** Decision cues: shipped defaults extended by ~/.bastra/lexicon/decision.txt. */
+/** Decision cues from ~/.bastra/lexicon/decision.txt (none shipped). */
 export function decisionCues(): string[] {
-  return loadCues("decision", DEFAULT_DECISION_CUES);
+  return loadCues("decision");
 }
 
 /**
  * #707 — the #159 save-quality admission flags (save-quality.ts), formerly
- * three EN/DE regex literals. Same shape as the stop-lane cues: per-language
- * data, extended by a user file (`negative-claim.txt`, `fix-marker.txt`,
- * `imperative-lead.txt`), matched with Unicode letter boundaries.
+ * three EN/DE regex literals: a negative capability claim ("is broken",
+ * "funktioniert nicht"), a fix marker ("workaround", "Lösung"), an imperative
+ * lead ("Always …", "Immer …"). Same shape as the stop-lane cues: nothing
+ * shipped, a user file (`negative-claim.txt`, `fix-marker.txt`,
+ * `imperative-lead.txt`) adds the phrasings of the languages its user writes,
+ * matched with Unicode letter boundaries.
  *
- * The neutral path for a language without a list: the flags are advisory
- * penalties, so an unlisted language gets NO penalty rather than a guessed
- * one — and the fix check has a structural half that works in every script
- * (a code span or fenced block in the body counts as a captured fix).
+ * Without a file the flags stay silent for every language alike; the fix
+ * check keeps its structural half, which works in every script (a code span
+ * or fenced block in the body counts as a captured fix).
  */
-export const DEFAULT_NEGATIVE_CLAIM_CUES_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  en: ["is\\s+broken", "does\\s?n[o']?t\\s+work", "not\\s+working", "no\\s+longer\\s+works", "never\\s+works"],
-  de: ["funktioniert\\s+nicht(?:\\s+mehr)?", "ist\\s+kaputt", "geht\\s+nicht(?:\\s+mehr)?"],
-  ru: ["не\\s+работает", "больше\\s+не\\s+работает", "сломан[аоы]?"],
-};
 
-export const DEFAULT_FIX_MARKER_CUES_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  en: ["fix(?:ed)?", "solution", "workaround", "instead", "how\\s+to\\s+apply"],
-  de: ["lösung", "abhilfe", "stattdessen"],
-  ru: ["исправлен[оаы]?", "решение", "вместо", "обходной\\s+путь"],
-};
-
-export const DEFAULT_IMPERATIVE_LEAD_CUES_BY_LANGUAGE: Readonly<Record<string, readonly string[]>> = {
-  en: ["always", "never", "don'?t", "do\\s+not", "avoid", "remember\\s+to", "ensure"],
-  de: ["immer", "nie(?:mals)?", "benutze", "verwende", "vermeide", "nutze", "stelle\\s+sicher"],
-  ru: ["всегда", "никогда", "не\\s+используй", "избегай", "используй"],
-};
-
-/** Negative-claim cues: defaults extended by ~/.bastra/lexicon/negative-claim.txt. */
+/** Negative-claim cues from ~/.bastra/lexicon/negative-claim.txt (none shipped). */
 export function negativeClaimCues(): string[] {
-  return loadCues("negative-claim", Object.values(DEFAULT_NEGATIVE_CLAIM_CUES_BY_LANGUAGE).flat());
+  return loadCues("negative-claim");
 }
 
-/** Fix-marker cues: defaults extended by ~/.bastra/lexicon/fix-marker.txt. */
+/** Fix-marker cues from ~/.bastra/lexicon/fix-marker.txt (none shipped). */
 export function fixMarkerCues(): string[] {
-  return loadCues("fix-marker", Object.values(DEFAULT_FIX_MARKER_CUES_BY_LANGUAGE).flat());
+  return loadCues("fix-marker");
 }
 
-/** Imperative-lead cues: defaults extended by ~/.bastra/lexicon/imperative-lead.txt. */
+/** Imperative-lead cues from ~/.bastra/lexicon/imperative-lead.txt (none shipped). */
 export function imperativeLeadCues(): string[] {
-  return loadCues("imperative-lead", Object.values(DEFAULT_IMPERATIVE_LEAD_CUES_BY_LANGUAGE).flat());
+  return loadCues("imperative-lead");
 }

@@ -301,3 +301,29 @@ export function hasWordForm(tokens: ReadonlySet<string>, word: string): boolean 
   }
   return false;
 }
+
+// ─── questions ──────────────────────────────────────────────────────────────
+
+/** A question mark that ends a clause: after a letter, digit or closing
+ *  quote/bracket, and followed by whitespace, "!", another question mark, a
+ *  closing quote/bracket or the end — not the `?` of `a?.b` or a URL query.
+ *  French typography puts a space before it ("c'est quoi ?"); then only the
+ *  end of the clause may follow, so `x ?? y` stays code. */
+const QUESTION_END_RE =
+  /[\p{L}\p{M}\p{N}"'»”’)\]}」』](?:[?？؟\u037e፧‽⁇⁈⁉](?=[\s?？!！"'»”’)」』*_`]|$)|[\u0020\u00a0\u202f][?？؟\u037e፧‽⁇⁈⁉](?=[!！]*(?:\s|$)))/u;
+/** Greek writes its question mark as the semicolon key: a ";" after a Greek
+ *  word at the end of a line. Anywhere else ";" is a semicolon. */
+const GREEK_QUESTION_RE = /\p{Script=Greek}\p{M}*;[ \t]*(?:\n|$)/u;
+/** A question opened explicitly: Spanish ¿, and the Armenian question mark,
+ *  which sits inside the word it questions. */
+const QUESTION_OPEN_RE = /[¿՞]/u;
+
+/**
+ * Is `text` a question — in any script? A clause ending in ? ？ ؟ ፧ ‽ (also
+ * after the French space), the Greek ";" after a Greek word at the end of a
+ * line, or an opening ¿ / ՞. A property of punctuation every script has, not
+ * of question words; code (`a?.b`, `x ?? y`) and URL queries are not.
+ */
+export function isQuestion(text: string): boolean {
+  return QUESTION_END_RE.test(text) || GREEK_QUESTION_RE.test(text) || QUESTION_OPEN_RE.test(text);
+}

@@ -53,22 +53,8 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
   "packages/daemon/src/learned-recall/language.ts :: latin [^a-zäöüß]": "#707 filing-folder detection only (a non-Latin query abstains → und)",
 
   // ── #707: per-language data with a documented neutral path — allowed shape ──
-  "packages/daemon/src/lexicon.ts :: name DEFAULT_DECISION_CUES_BY_LANGUAGE": "#707 per-language data; stop-lane-choice.ts option pick is the neutral fallback",
-  "packages/daemon/src/lexicon.ts :: keyed DEFAULT_DECISION_CUES_BY_LANGUAGE": "#707 per-language data with a neutral fallback (option pick)",
-  "packages/daemon/src/lexicon.ts :: name DEFAULT_DECISION_CUES": "#707 flattened decision cues, neutral fallback exists",
   "packages/core/src/stopwords.ts :: keyed ALTERNATIVE_WORDS_BY_LANGUAGE": "#707 per-language data; a free-standing / or | splits alternatives in any script (tested with el)",
-  "packages/daemon/src/todo-lane.ts :: keyed TODO_VERBS_BY_LANGUAGE": "#707 per-language data; an unlisted language keeps every content word as a topic (tested with ru)",
-  "packages/daemon/src/lexicon.ts :: name DEFAULT_NEGATIVE_CLAIM_CUES_BY_LANGUAGE": "#707 per-language data, user-extensible; an unlisted language gets no advisory penalty",
-  "packages/daemon/src/lexicon.ts :: keyed DEFAULT_NEGATIVE_CLAIM_CUES_BY_LANGUAGE": "#707 per-language data with a neutral path (no penalty)",
-  "packages/daemon/src/lexicon.ts :: name DEFAULT_FIX_MARKER_CUES_BY_LANGUAGE": "#707 per-language data; a code span/fenced block counts as the fix in any script",
-  "packages/daemon/src/lexicon.ts :: keyed DEFAULT_FIX_MARKER_CUES_BY_LANGUAGE": "#707 per-language data with a structural fallback (code span)",
-  "packages/daemon/src/lexicon.ts :: name DEFAULT_IMPERATIVE_LEAD_CUES_BY_LANGUAGE": "#707 per-language data, user-extensible; an unlisted language gets no advisory penalty",
-  "packages/daemon/src/lexicon.ts :: keyed DEFAULT_IMPERATIVE_LEAD_CUES_BY_LANGUAGE": "#707 per-language data with a neutral path (no penalty)",
 
-  // ── #676: per-language data with a neutral fallback (#678) — allowed shape ──
-  "packages/daemon/src/lexicon.ts :: name DEFAULT_FRUSTRATION_CUES_BY_LANGUAGE": "#678 per-language data; the stop lane's neutral repeated-correction check covers other languages",
-  "packages/daemon/src/lexicon.ts :: keyed DEFAULT_FRUSTRATION_CUES_BY_LANGUAGE": "#678 per-language data with a neutral fallback",
-  "packages/daemon/src/lexicon.ts :: name DEFAULT_FRUSTRATION_CUES": "#678 flattened frustration cues, neutral fallback exists",
 
 
   // ── #676: impact intent stays with the Experimental milestone ──

@@ -34,6 +34,7 @@ export {
   letterCount,
   normalizeText,
   foldTerm,
+  isQuestion,
   sameWordForm,
   hasWordForm,
   WORD_FORM_MIN_LEN,

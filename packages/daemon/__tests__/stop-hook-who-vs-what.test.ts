@@ -25,6 +25,10 @@ import {
   evaluateHeuristics,
   normalizeTurns,
 } from "../src/stop-lane.js";
+import { installUserLexicon } from "./user-lexicon.js";
+
+// The cue-word path runs on a user's own lexicon file — nothing is shipped.
+installUserLexicon();
 
 // Der Nutzer sagt in JEDEM Turn nur "ok" — kein Cue in keiner Sprache.
 const USER_OK = { role: "user", content: "ok" };

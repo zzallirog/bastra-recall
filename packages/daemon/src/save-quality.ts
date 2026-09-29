@@ -125,10 +125,13 @@ export function claimingTrigger(trigger: string, theirs: string[]): string | und
 // phrasing gets re-read as a directive in unrelated later contexts. Both are
 // advisory-only flags, never blocks.
 //
-// #707: the phrasings are per-language data in lexicon.ts (user-extensible),
-// matched with Unicode letter boundaries — JS `\b` is ASCII-only, so a
-// Cyrillic cue could never match. A language without a list gets no penalty.
-function cueRegex(cues: readonly string[], anchored: boolean): RegExp {
+// #707: the phrasings used to be English and German regex literals; every
+// other language's note passed unjudged. They are the user's lexicon files
+// now (lexicon.ts, none shipped), matched with Unicode letter boundaries — JS
+// `\b` is ASCII-only, so a Cyrillic cue could never match. No file, no flag,
+// for every language alike (lang-parity).
+function cueRegex(cues: readonly string[], anchored: boolean): RegExp | null {
+  if (cues.length === 0) return null; // `(?:)` would match every text
   const lead = anchored ? "^" : "(?<![\\p{L}\\p{N}])";
   return new RegExp(`${lead}(?:${cues.join("|")})(?![\\p{L}\\p{N}])`, "iu");
 }
@@ -187,9 +190,11 @@ export function scoreSaveQuality(
 
   // #159: 'X is broken / doesn't work' without a fix becomes a standing
   // refusal that keeps surfacing long after the problem was solved
+  const negativeClaim = cueRegex(negativeClaimCues(), false);
+  const fixMarker = cueRegex(fixMarkerCues(), false);
   if (
-    cueRegex(negativeClaimCues(), false).test(`${input.title} ${input.summary}`) &&
-    !cueRegex(fixMarkerCues(), false).test(`${input.summary} ${input.body}`) &&
+    negativeClaim?.test(`${input.title} ${input.summary}`) &&
+    !fixMarker?.test(`${input.summary} ${input.body}`) &&
     !CODE_FIX_RE.test(input.body)
   ) {
     issues.push("negative capability claim without a fix — hardens into a standing refusal");
@@ -202,7 +207,7 @@ export function scoreSaveQuality(
   // #159: imperative lead reads as a directive when recalled in unrelated
   // contexts — declarative facts age better
   const imperativeLead = cueRegex(imperativeLeadCues(), true);
-  if (imperativeLead.test(input.title.trim()) || imperativeLead.test(input.summary.trim())) {
+  if (imperativeLead && (imperativeLead.test(input.title.trim()) || imperativeLead.test(input.summary.trim()))) {
     issues.push("imperative phrasing — re-reads as a self-directive in unrelated later contexts");
     suggestions.push("state it as a declarative fact: 'User prefers …' / 'X requires Y', not 'Always/Never …'");
     score -= 8;

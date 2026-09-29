@@ -13,6 +13,10 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runStopLane, type ClaudeStopPayload } from "../src/stop-lane.js";
+import { installUserLexicon } from "./user-lexicon.js";
+
+// The cue-word path runs on a user's own lexicon file — nothing is shipped.
+installUserLexicon();
 
 const DECISION_TRANSCRIPT = [
   { role: "user", content: "we compared both options. decided: we go with the queue, not polling" },

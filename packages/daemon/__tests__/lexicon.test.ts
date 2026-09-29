@@ -1,8 +1,9 @@
 /**
  * Cue lexicons as data (#476 follow-up): the frustration/decision lists moved
- * from `const` arrays in stop-lane.ts to lexicon.ts — shipped defaults plus an
- * optional user-editable file that EXTENDS them. These tests pin the loader
- * contract and prove a file-added cue actually reaches the live heuristic.
+ * from `const` arrays in stop-lane.ts to lexicon.ts, and are now only the
+ * user's own file — nothing is shipped, the stop lane's language-neutral
+ * signals serve every language. These tests pin the loader contract and prove
+ * a file-added cue actually reaches the live heuristic.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,12 +11,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import {
-  frustrationCues,
-  decisionCues,
-  DEFAULT_FRUSTRATION_CUES,
-  DEFAULT_DECISION_CUES,
-} from "../src/lexicon.js";
+import { frustrationCues, decisionCues } from "../src/lexicon.js";
+import { USER_FRUSTRATION_CUES, USER_DECISION_CUES } from "./user-lexicon.js";
 import { detectFrustration, type TranscriptTurn } from "../src/stop-lane.js";
 
 async function withLexiconDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -31,14 +28,14 @@ async function withLexiconDir(fn: (dir: string) => Promise<void>): Promise<void>
   }
 }
 
-test("lexicon (#476): no file → shipped defaults only", async () => {
+test("lexicon: no file → no cues — nothing is shipped, every language starts equal", async () => {
   await withLexiconDir(async () => {
-    assert.deepEqual(frustrationCues(), [...DEFAULT_FRUSTRATION_CUES]);
-    assert.deepEqual(decisionCues(), [...DEFAULT_DECISION_CUES]);
+    assert.deepEqual(frustrationCues(), []);
+    assert.deepEqual(decisionCues(), []);
   });
 });
 
-test("lexicon (#476): a file EXTENDS the defaults, comments/blanks ignored, dupes dropped", async () => {
+test("lexicon (#476): a file supplies the cues, comments/blanks ignored, dupes dropped", async () => {
   await withLexiconDir(async (dir) => {
     await writeFile(
       join(dir, "frustration.txt"),
@@ -47,26 +44,21 @@ test("lexicon (#476): a file EXTENDS the defaults, comments/blanks ignored, dupe
         "разозлился",
         "",
         "ach-nein   # inline comment stripped",
-        "wieder", // already a default → must not duplicate
+        "wieder",
+        "wieder", // a repeat → must not duplicate
       ].join("\n"),
       "utf8",
     );
     const cues = frustrationCues();
-    // defaults still present, in front
-    assert.deepEqual(cues.slice(0, DEFAULT_FRUSTRATION_CUES.length), [...DEFAULT_FRUSTRATION_CUES]);
-    // new entries appended
-    assert.ok(cues.includes("разозлился"), "file cue missing");
-    assert.ok(cues.includes("ach-nein"), "inline-comment line not cleaned/kept");
-    // "wieder" is a default; it must appear exactly once
-    assert.equal(cues.filter((c) => c === "wieder").length, 1, "default duplicated");
+    assert.deepEqual(cues, ["разозлился", "ach-nein", "wieder"], "file order, cleaned, deduped");
   });
 });
 
-test("lexicon (#476): a bad/unreadable path falls back to defaults, never throws", async () => {
+test("lexicon (#476): a bad/unreadable path means no cues, never throws", async () => {
   const prev = process.env.BASTRA_LEXICON_DIR;
   process.env.BASTRA_LEXICON_DIR = join(tmpdir(), "bastra-lexicon-does-not-exist-xyz");
   try {
-    assert.deepEqual(frustrationCues(), [...DEFAULT_FRUSTRATION_CUES]);
+    assert.deepEqual(frustrationCues(), []);
   } finally {
     if (prev === undefined) delete process.env.BASTRA_LEXICON_DIR;
     else process.env.BASTRA_LEXICON_DIR = prev;
@@ -90,7 +82,7 @@ test("lexicon (#476): an edit is picked up immediately (read-fresh, no cache)", 
 test("lexicon (#476): a file-added cue actually fires detectFrustration (end-to-end)", async () => {
   const angry: TranscriptTurn[] = Array.from({ length: 4 }, () => ({
     role: "user",
-    // a word that is NOT in the shipped defaults
+    // a word only the user's file names
     content: "ну вот я разозлился на это",
   }));
 
@@ -108,7 +100,7 @@ test("lexicon (#476): a file-added cue actually fires detectFrustration (end-to-
   });
 });
 
-test("lexicon: a cue that is not a valid regex, or hides a quantified group (ReDoS), is dropped — defaults untouched", async () => {
+test("lexicon: a cue that is not a valid regex, or hides a quantified group (ReDoS), is dropped — the rest loads", async () => {
   await withLexiconDir(async (dir) => {
     await writeFile(
       join(dir, "frustration.txt"),
@@ -116,7 +108,6 @@ test("lexicon: a cue that is not a valid regex, or hides a quantified group (ReD
       "utf8",
     );
     const cues = frustrationCues();
-    assert.deepEqual(cues.slice(0, DEFAULT_FRUSTRATION_CUES.length), [...DEFAULT_FRUSTRATION_CUES]);
     assert.ok(cues.includes("честный-кью"), "valid file cue must still be added");
     for (const bad of ["(unclosed", "(a+)+$", "x".repeat(400)]) {
       assert.ok(!cues.includes(bad), `invalid cue reached the live lexicon: ${bad.slice(0, 20)}`);
@@ -150,10 +141,11 @@ test("lexicon (#517): overlapping repeats without a group are dropped — the is
   });
 });
 
-test("lexicon (#517): every shipped default fits the cue grammar a file entry has to meet", async () => {
+test("lexicon (#517): the cue lists that used to ship still fit the grammar a file entry has to meet", async () => {
   await withLexiconDir(async (dir) => {
+    // A user who wants the old de/en/ru cues back writes them into the file.
     // A suffix makes each one a NEW cue, so it is validated instead of deduped.
-    const variants = [...DEFAULT_FRUSTRATION_CUES, ...DEFAULT_DECISION_CUES].map((c) => `${c}zz`);
+    const variants = [...USER_FRUSTRATION_CUES, ...USER_DECISION_CUES].map((c) => `${c}zz`);
     await writeFile(join(dir, "decision.txt"), variants.join("\n"), "utf8");
     const cues = decisionCues();
     for (const v of variants) assert.ok(cues.includes(v), `default-shaped cue rejected: ${v}`);
@@ -161,12 +153,12 @@ test("lexicon (#517): every shipped default fits the cue grammar a file entry ha
 });
 
 test(
-  "lexicon (#517): a FIFO at the cue path does not block — defaults, immediately",
+  "lexicon (#517): a FIFO at the cue path does not block — no cues, immediately",
   { skip: process.platform === "win32" },
   async () => {
     await withLexiconDir(async (dir) => {
       execFileSync("mkfifo", [join(dir, "frustration.txt")]);
-      assert.deepEqual(frustrationCues(), [...DEFAULT_FRUSTRATION_CUES]);
+      assert.deepEqual(frustrationCues(), []);
     });
   },
 );

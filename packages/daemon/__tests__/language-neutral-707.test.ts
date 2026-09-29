@@ -9,9 +9,9 @@
  *   taxonomy         a convention title in Cyrillic covers its cluster
  *   reflex           alternatives split by per-language data (`или`) and by a
  *                    free-standing `/` in any script
- *   save-quality     the #159 admission flags are lexicon data: shipped `ru`,
- *                    no penalty for an unlisted language, a code span counts
- *                    as the fix in any script, a user file adds a language
+ *   save-quality     the #159 admission flags come from the user's lexicon
+ *                    files only (none shipped): no file, no penalty in any
+ *                    language; a code span counts as the fix in any script
  *
  * Runner: node --import tsx --import ./scripts/test-env.mjs --test packages/daemon/__tests__/language-neutral-707.test.ts
  */
@@ -212,10 +212,19 @@ async function withLexiconDir(files: Record<string, string>, run: () => Promise<
   }
 }
 
-test("#707 save-quality: shipped Russian cues flag a negative claim without a fix, and an imperative lead", async (t) => {
+test("#707 save-quality: a user's Russian cue files flag a negative claim without a fix, and an imperative lead", async (t) => {
   const { deps, close } = await makeDeps();
   t.after(close);
   await withLexiconDir({}, async () => {
+    const res = scoreSaveQuality(deps, input("Всегда перезапускать сервер", "Сервер не работает после деплоя.", "Пока без идей."), "x");
+    assert.ok(!res.issues.some((i) => i.includes(NEGATIVE) || i.includes(IMPERATIVE)), "nothing shipped → no flag");
+  });
+  const files = {
+    "negative-claim.txt": "не\\s+работает\n",
+    "fix-marker.txt": "решение\n",
+    "imperative-lead.txt": "всегда\n",
+  };
+  await withLexiconDir(files, async () => {
     const broken = scoreSaveQuality(deps, input("сервер", "Сервер не работает после деплоя.", "Пока без идей."), "x");
     assert.ok(broken.issues.some((i) => i.includes(NEGATIVE)), JSON.stringify(broken.issues));
     const fixed = scoreSaveQuality(deps, input("сервер", "Сервер не работает после деплоя.", "Решение: перезапуск."), "x");
@@ -228,19 +237,19 @@ test("#707 save-quality: shipped Russian cues flag a negative claim without a fi
 test("#707 save-quality: a code span in the body counts as the captured fix in any script", async (t) => {
   const { deps, close } = await makeDeps();
   t.after(close);
-  await withLexiconDir({}, async () => {
+  await withLexiconDir({ "negative-claim.txt": "не\\s+работает\n" }, async () => {
     const res = scoreSaveQuality(deps, input("сервер", "Сервер не работает после деплоя.", "`systemctl restart app`"), "x");
     assert.ok(!res.issues.some((i) => i.includes(NEGATIVE)), JSON.stringify(res.issues));
   });
 });
 
-test("#707 save-quality: an unlisted language gets no guessed penalty, and a lexicon file adds it", async (t) => {
+test("#707 save-quality: no lexicon file gets no guessed penalty, and a lexicon file adds the language", async (t) => {
   const { deps, close } = await makeDeps();
   t.after(close);
   const greek = input("διακομιστής", "Ο διακομιστής δεν λειτουργεί μετά την ανάπτυξη.", "Καμία ιδέα ακόμα.");
   await withLexiconDir({}, async () => {
     const res = scoreSaveQuality(deps, greek, "x");
-    assert.ok(!res.issues.some((i) => i.includes(NEGATIVE)), "no Greek list → neutral, no penalty");
+    assert.ok(!res.issues.some((i) => i.includes(NEGATIVE)), "no file → neutral, no penalty");
   });
   await withLexiconDir({ "negative-claim.txt": "δεν\\s+λειτουργεί\n" }, async () => {
     const res = scoreSaveQuality(deps, greek, "x");

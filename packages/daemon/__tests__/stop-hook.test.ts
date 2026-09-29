@@ -10,6 +10,10 @@ import {
   normalizeTurns,
   type TranscriptTurn,
 } from "../src/stop-lane.js";
+import { installUserLexicon } from "./user-lexicon.js";
+
+// The cue-word path runs on a user's own lexicon file — nothing is shipped.
+installUserLexicon();
 
 function userTurn(content: string): TranscriptTurn {
   return { role: "user", content };
@@ -148,6 +152,14 @@ describe("stop-hook: #476 the lane fires for non-German users too", () => {
     assert.ok(detectFrustration(turns), "Cyrillic CAPS must count as cues");
   });
 
+  it("fires when the user picks an offered option by its NAME, in any language (no cue list)", () => {
+    const offer = assistantTurn("İki seçenek:\n1. Postgres — ilişkisel, zaten işletiyoruz\n2. MongoDB — esnek dokümanlar\nHangisini tercih edersin?");
+    assert.ok(detectArchitectureDecision([userTurn("hangi veritabanı?"), offer, userTurn("tamam, Postgres ile gidiyoruz")]));
+    assert.ok(detectArchitectureDecision([userTurn("?"), offer, userTurn("ok, mennään Postgresilla")]), "an inflected name counts");
+    assert.equal(detectArchitectureDecision([userTurn("?"), offer, userTurn("Postgres mi MongoDB mi daha ucuz?")]), null, "a question back is no pick");
+    assert.equal(detectArchitectureDecision([userTurn("?"), offer, userTurn("Postgres ve MongoDB ikisi de olur")]), null, "naming both is no pick");
+  });
+
   it("fires on English and Russian decision cues", () => {
     assert.ok(detectArchitectureDecision([userTurn("ok then, let's go with Drizzle")]));
     assert.ok(detectArchitectureDecision([userTurn("we'll go with MapKit")]));
@@ -229,6 +241,16 @@ describe("stop-hook: #678 languages without a cue list fire on repeated correcti
       null,
     );
     assert.equal(detectFrustration([userTurn("dalej!"), userTurn("dalej!"), userTurn("dalej!"), userTurn("dalej!")]), null);
+  });
+
+  it("fires on ONE restatement when the voice is raised (!!, ！！) — in any script", () => {
+    for (const [first, again] of [
+      ["settings.yml を config.yaml にリネームして", "だから言ったでしょ：settings.yml を config.yaml にリネームして！！"],
+      ["من فضلك غيّر اسم الملف settings.yml إلى config.yaml", "قلت لك من قبل: غيّر اسم الملف settings.yml إلى config.yaml!!"],
+    ]) {
+      const turns: TranscriptTurn[] = [userTurn(first), assistantTurn("done"), userTurn(again)];
+      assert.ok(detectFrustration(turns), `raised-voice restatement must fire: ${again}`);
+    }
   });
 
   it("does not fire on unrelated emphatic requests in one language", () => {
